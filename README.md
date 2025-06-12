@@ -9,9 +9,9 @@ This SDK provides high-level and dynamic access to those tools, making it easy t
 ## Features
 
 - Discover and list available `mcpd` hosted MCP servers
-- Retrieve tool definitions and schemas
-- Dynamically invoke any tool using structured arguments
-- Generate self-contained tool functions for frameworks like [any-agent](https://github.com/mozilla-ai/any-agent)
+- Retrieve tool definitions and schemas for one or all servers
+- Dynamically invoke any tool using a clean, attribute-based syntax
+- Generate self-contained, deepcopy-safe tool functions for frameworks like [any-agent](https://github.com/mozilla-ai/any-agent)
 - Minimal dependencies (`requests` only)
 
 ## Installation
@@ -37,18 +37,24 @@ uv sync
 ## Quick Start
 
 ```python
-from mcpd_sdk import McpdClient
+from mcpd_sdk import McpdClient, McpdError
 
 client = McpdClient(endpoint="http://localhost:8090")
 
 # List available servers
 print(client.servers())
+# Example: ['time', 'fetch', 'git']
 
-# List tool definitions for a specific server
-print(client.tools("time"))
+# List tool definitions (schemas) for a specific server
+print(client.tools(server_name="time"))
 
 # Dynamically call a tool
-print(client.tool_caller.time.get_current_time(timezone="UTC"))
+try:
+    result = client.call.time.get_current_time(timezone="UTC")
+    print(result)
+except McpdError as e:
+    print(f"Error: {e}")
+
 ```
 
 ## Agentic Usage
@@ -59,16 +65,17 @@ Generate dynamic functions suitable for AI agents:
 from any_agent import AnyAgent, AgentConfig
 from mcpd_sdk import McpdClient
 
+# Assumes the mcpd daemon is running
 client = McpdClient(endpoint="http://localhost:8090")
 
 agent_config = AgentConfig(
-    tools=client.as_any_agent_tools(),
-    model_id="gpt-4.1-nano",
-    instructions="Use the tools to answer questions."
+    tools=client.agent_tools(),
+    model_id="gpt-4.1-nano", # Requires OPENAI_API_KEY to be set
+    instructions="Use the tools to answer the user's question."
 )
 agent = AnyAgent.create("mcpd-agent", agent_config)
 
-response = agent.run("What's the current time in Tokyo?")
+response = agent.run("What is the current time in Tokyo?")
 print(response)
 ```
 
@@ -82,31 +89,32 @@ Refer to [example/README.md](example/README.md) for setup and execution details.
 ### Initialization
 
 ```python
+from mcpd_sdk import McpdClient
+
+# Initialize the client with your mcpd API endpoint.
+# api_key is optional and sends an 'MCPD-API-KEY' header.
 client = McpdClient(endpoint="http://localhost:8090", api_key="optional-key")
 ```
 
 ### Core Methods
 
-* `McpdClient(endpoint: str, api_key: str = None)` -
-Initialize the client with your mcpd API endpoint.
+* `client.servers() -> list[str]` - Returns a list of all configured server names.
 
-* `client.servers()` - Returns a list of server names.
+* `client.tools() -> dict[str, list[dict]]` - Returns a dictionary mapping each server name to a list of its tool schema definitions.
 
-* `client.tools(server_name: str)` - Returns tool schema definitions for the specified server.
+* `client.tools(server_name: str) -> list[dict]` - Returns the tool schema definitions for only the specified server.
 
-* `client.tools()` - Returns a list of callable functions for all discovered tools.
+* `client.agent_tools() -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks.
 
-* `client.tool_caller.<server>.<tool>(**kwargs)` - Dynamically call any tool using keyword arguments.
+* `client.has_tool(server_name: str, tool_name: str) -> bool` - Checks if a specific tool exists on a given server.
 
-* `client.call(server_name, tool_name, params={})` - Low-level direct tool invocation.
-
-* `client.as_any_agent_tools()` - Returns a list of callable functions with introspectable signatures, safe for use with LLM frameworks.
-
-* `client.get_all_tool_definitions()` - Returns all tool schema definitions across all servers, with names scoped by server.
+* `client.call.<server_name>.<tool_name>(**kwargs)` - The primary way to dynamically call any tool using keyword arguments.
 
 ## Error Handling
 
-All SDK-level errors raise a `McpdError` exception with details and any HTTP response body attached.
+All SDK-level errors, including HTTP and connection errors, will raise a `McpdError` exception.
+The original exception is chained for full context.
+
 
 ## License
 
