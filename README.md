@@ -1,6 +1,6 @@
 # mcpd-sdk-python
 
-`mcpd-sdk-python` is a lightweight Python SDK for interacting with the [mcpd](https://github.com/mozilla-ai/mcpd-cli) application.
+`mcpd-sdk-python` is a lightweight Python SDK for interacting with the [mcpd](https://github.com/mozilla-ai/mcpd) application.
 
 A daemon that exposes MCP server tools via a simple HTTP API.
 
