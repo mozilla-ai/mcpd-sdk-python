@@ -531,6 +531,63 @@ wheels = [
 ]
 
 [[package]]
+name = "example-anyagent"
+version = "0.0.1"
+source = { virtual = "." }
+dependencies = [
+    { name = "any-agent", extra = ["all"] },
+    { name = "mcpd-sdk" },
+    { name = "requests" },
+]
+
+[package.dev-dependencies]
+all = [
+    { name = "debugpy" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+dev = [
+    { name = "debugpy" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+lint = [
+    { name = "pre-commit" },
+    { name = "ruff" },
+]
+tests = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "any-agent", extras = ["all"], specifier = ">=0.19.1" },
+    { name = "mcpd-sdk", editable = "../../" },
+    { name = "requests", specifier = ">=2.32.4" },
+]
+
+[package.metadata.requires-dev]
+all = [
+    { name = "debugpy", specifier = ">=1.8.14" },
+    { name = "pre-commit", specifier = ">=4.2.0" },
+    { name = "pytest", specifier = ">=8.3.5" },
+    { name = "ruff", specifier = ">=0.11.13" },
+]
+dev = [
+    { name = "debugpy", specifier = ">=1.8.14" },
+    { name = "pre-commit", specifier = ">=4.2.0" },
+    { name = "pytest", specifier = ">=8.3.5" },
+    { name = "ruff", specifier = ">=0.11.13" },
+]
+lint = [
+    { name = "pre-commit", specifier = ">=4.2.0" },
+    { name = "ruff", specifier = ">=0.11.13" },
+]
+tests = [{ name = "pytest", specifier = ">=8.3.5" }]
+
+[[package]]
 name = "fastapi"
 version = "0.115.12"
 source = { registry = "https://pypi.org/simple" }
@@ -2061,7 +2118,7 @@ wheels = [
 [[package]]
 name = "mcpd-sdk"
 version = "0.0.1"
-source = { editable = "../" }
+source = { editable = "../../" }
 dependencies = [
     { name = "requests" },
 ]
@@ -3264,63 +3321,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/46/f4/7c27734ac2073aae8efb0119cae6931b6fb48017adf048fdf85c19337afc/ruff-0.11.13-py3-none-win_amd64.whl", hash = "sha256:29c3189895a8a6a657b7af4e97d330c8a3afd2c9c8f46c81e2fc5a31866517e3", size = 11548669, upload-time = "2025-06-05T21:00:11.147Z" },
     { url = "https://files.pythonhosted.org/packages/ec/bf/b273dd11673fed8a6bd46032c0ea2a04b2ac9bfa9c628756a5856ba113b0/ruff-0.11.13-py3-none-win_arm64.whl", hash = "sha256:b4385285e9179d608ff1d2fb9922062663c658605819a6876d8beef0c30b7f3b", size = 10683928, upload-time = "2025-06-05T21:00:13.758Z" },
 ]
-
-[[package]]
-name = "sample-app"
-version = "0.0.1"
-source = { virtual = "." }
-dependencies = [
-    { name = "any-agent", extra = ["all"] },
-    { name = "mcpd-sdk" },
-    { name = "requests" },
-]
-
-[package.dev-dependencies]
-all = [
-    { name = "debugpy" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-dev = [
-    { name = "debugpy" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-lint = [
-    { name = "pre-commit" },
-    { name = "ruff" },
-]
-tests = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "any-agent", extras = ["all"], specifier = ">=0.19.1" },
-    { name = "mcpd-sdk", editable = "../" },
-    { name = "requests", specifier = ">=2.32.4" },
-]
-
-[package.metadata.requires-dev]
-all = [
-    { name = "debugpy", specifier = ">=1.8.14" },
-    { name = "pre-commit", specifier = ">=4.2.0" },
-    { name = "pytest", specifier = ">=8.3.5" },
-    { name = "ruff", specifier = ">=0.11.13" },
-]
-dev = [
-    { name = "debugpy", specifier = ">=1.8.14" },
-    { name = "pre-commit", specifier = ">=4.2.0" },
-    { name = "pytest", specifier = ">=8.3.5" },
-    { name = "ruff", specifier = ">=0.11.13" },
-]
-lint = [
-    { name = "pre-commit", specifier = ">=4.2.0" },
-    { name = "ruff", specifier = ">=0.11.13" },
-]
-tests = [{ name = "pytest", specifier = ">=8.3.5" }]
 
 [[package]]
 name = "shapely"

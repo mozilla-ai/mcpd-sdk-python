@@ -1,12 +1,11 @@
 [project]
-name = "sample-app"
+name = "example-manual-use"
 version = "0.0.1"
-description = "sample app using any-agent and mcpd"
+description = "Example using mcpd with manual SDK calls"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 dependencies = [
-    "any-agent[all]>=0.19.1",
     "requests>=2.32.4",
     "mcpd_sdk",
 ]
@@ -34,7 +33,7 @@ all = [
 ]
 
 [tool.uv.sources]
-mcpd_sdk = { path = "..", editable = true }
+mcpd_sdk = { path = "../..", editable = true }
 
 [tool.ruff]
 fix = true
