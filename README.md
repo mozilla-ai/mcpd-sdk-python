@@ -81,8 +81,14 @@ print(response)
 
 ## Examples
 
-A working example using any-agent and this SDK is available in the `example/` folder.
-Refer to [example/README.md](example/README.md) for setup and execution details.
+A working SDK examples are available in the `examples/` folder,
+please refer to the relevant example for execution details.
+
+| Method      | Docs                                        |
+|-------------|---------------------------------------------|
+| AnyAgent    | [README.md](examples/anyagent/README.md)    |
+| Manual      | [README.md](examples/manual/README.md)      |
+| Pydantic AI | [README.md](examples/pydantic-ai/README.md) |
 
 ## API
 
@@ -93,7 +99,7 @@ from mcpd_sdk import McpdClient
 
 # Initialize the client with your mcpd API endpoint.
 # api_key is optional and sends an 'MCPD-API-KEY' header.
-client = McpdClient(endpoint="http://localhost:8090", api_key="optional-key")
+client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key")
 ```
 
 ### Core Methods
@@ -105,6 +111,8 @@ client = McpdClient(endpoint="http://localhost:8090", api_key="optional-key")
 * `client.tools(server_name: str) -> list[dict]` - Returns the tool schema definitions for only the specified server.
 
 * `client.agent_tools() -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks.
+
+* `client.clear_agent_tools_cache()` - Clears cached generated callable functions that are created when calling agent_tools().
 
 * `client.has_tool(server_name: str, tool_name: str) -> bool` - Checks if a specific tool exists on a given server.
 

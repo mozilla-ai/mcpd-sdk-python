@@ -1,9 +1,0 @@
-[[servers]]
-  name = "time"
-  package = "pypi::mcp-server-time@0.6.2"
-  tools = ["get_current_time"]
-
-[[servers]]
-  name = "fetch"
-  package = "pypi::mcp-server-fetch@2025.4.7"
-  tools = ["fetch"]

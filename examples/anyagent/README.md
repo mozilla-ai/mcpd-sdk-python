@@ -26,7 +26,7 @@ Here is an example of some custom configuration for the `mcp-server-time` (time)
 Run the following command to create this file if you don't want the time MCP Server to use defaults:
 
 ```bash
-mcpd config set-args time --arg --local-timezone=Europe/London
+mcpd config args set time -- --local-timezone=Europe/London
 ```
 
 ### Project configuration file
