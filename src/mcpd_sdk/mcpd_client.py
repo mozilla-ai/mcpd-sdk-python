@@ -35,7 +35,7 @@ class McpdClient:
     def _perform_call(self, server_name: str, tool_name: str, params: dict[str, Any]) -> Any:
         """Perform the actual API call to the MCP server."""
         try:
-            url = f"{self.endpoint}/api/v1/servers/{server_name}/{tool_name}"
+            url = f"{self.endpoint}/api/v1/servers/{server_name}/tools/{tool_name}"
             response = self.session.post(url, json=params, timeout=30)
             response.raise_for_status()
             return response.json()
@@ -70,7 +70,7 @@ class McpdClient:
     def _get_tool_definitions(self, server_name: str) -> list[dict[str, Any]]:
         """Get tool definitions for a specific server."""
         try:
-            url = f"{self.endpoint}/api/v1/servers/{server_name}"
+            url = f"{self.endpoint}/api/v1/servers/{server_name}/tools"
             response = self.session.get(url, timeout=5)
             response.raise_for_status()
             return response.json()
