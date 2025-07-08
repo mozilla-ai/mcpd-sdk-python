@@ -1,5 +1,8 @@
 from pydantic_ai import Agent, Tool
 from mcpd_sdk import McpdClient
+from dotenv import load_dotenv
+
+load_dotenv()  # Load the API key for the agent
 
 agent_model = "gpt-4.1-mini"
 
@@ -8,7 +11,7 @@ client = McpdClient(endpoint="http://localhost:8090")
 
 agent = Agent(
     agent_model,
-    tools=[Tool for tool in client.agent_tools()],
+    tools=client.agent_tools(),
     system_prompt="You must use the available GitHub tool to search for a README file, "
                      "create a new branch, create a new README file, and open a Pull Request.",
 
