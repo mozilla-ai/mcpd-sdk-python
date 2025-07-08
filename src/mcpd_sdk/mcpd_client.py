@@ -73,7 +73,8 @@ class McpdClient:
             url = f"{self.endpoint}/api/v1/servers/{server_name}/tools"
             response = self.session.get(url, timeout=5)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            return data.get("tools", [])
         except requests.exceptions.RequestException as e:
             raise McpdError(f"Error listing tool definitions for server '{server_name}'") from e
 
