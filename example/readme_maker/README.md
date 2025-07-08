@@ -17,7 +17,7 @@ source venv/bin/activate
 
 ### Step 2: Install dependencies
 ```bash
-pip install X mcpd-sdk
+pip install pydantic-ai mcpd-sdk
 ```
 
 ### Step 3: Initialize a new MCPD project and add the GitHub MCP server
