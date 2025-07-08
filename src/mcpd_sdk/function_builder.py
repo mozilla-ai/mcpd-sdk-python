@@ -1,3 +1,4 @@
+import re
 from types import FunctionType
 from typing import Any
 
@@ -11,6 +12,12 @@ class FunctionBuilder:
     def __init__(self, client):
         self.client = client
         self._function_cache = {}
+
+    def _safe_name(self, name: str) -> str:
+        return re.sub(r"\W|^(?=\d)", "_", name)  # replace non‑word chars, leading digit
+
+    def _function_name(self, server_name: str, schema_name: str) -> str:
+        return f"{self._safe_name(server_name)}__{self._safe_name(schema_name)}"
 
     def create_function_from_schema(self, schema: dict[str, Any], server_name: str) -> FunctionType:
         """Create a callable function from a JSON schema."""
@@ -28,7 +35,7 @@ class FunctionBuilder:
             # Execute and get the function
             namespace = self._create_namespace()
             exec(compiled_code, namespace)
-            function_name = f"{server_name}__{schema['name']}"
+            function_name = self._function_name(server_name, schema["name"])
             created_function = namespace[function_name]
             created_function.__annotations__ = annotations
 
@@ -53,7 +60,7 @@ class FunctionBuilder:
 
     def _build_function_code(self, schema: dict[str, Any], server_name: str) -> str:
         """Build the function code string."""
-        function_name = f"{server_name}__{schema['name']}"
+        function_name = self._function_name(server_name, schema["name"])
         input_schema = schema.get("inputSchema", {})
         properties = input_schema.get("properties", {})
         required_params = set(input_schema.get("required", []))
@@ -65,7 +72,6 @@ class FunctionBuilder:
         param_declarations = []
 
         # Build parameter signature
-        # for param_name in properties.keys():
         for param_name in sorted_param_names:
             if param_name in required_params:
                 param_declarations.append(param_name)
