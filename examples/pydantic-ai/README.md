@@ -13,7 +13,7 @@ application code to call tools on those MCP servers.
 
 ### Execution context config file
 
-`~/.mcpd/secrets.dev.toml` is the file that is used to provide user specific configuration to MCP servers via `mcpd`.
+`~/.config/mcpd/secrets.dev.toml` is the file that is used to provide user specific configuration to MCP servers via `mcpd`.
 
 Here is an example of some custom configuration for the `mcp-server-time` (time) server:
 
