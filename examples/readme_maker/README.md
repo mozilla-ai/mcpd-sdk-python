@@ -1,10 +1,11 @@
 # Pydantic AI README Maker
 
-This agent is built using the X framework and leverages GitHub's MCP server to automatically generate high-quality READMEs for your repositories.
+This agent is built using the `pydantic-ai` framework and leverages GitHub's MCP server to automatically generate READMEs for your repositories.
 
 ## Key Features
 
-* Generate READMEs based on a template repository
+* Generate READMEs for a target repository
+* Use another's repo README as a template
 * Automatically open a pull request with the generated README on your target repository
 
 ## Getting Started
@@ -28,7 +29,7 @@ mcpd add github
 
 ### Step 4: Configure your agent's API key and the GitHub token for the MCP server
 ```bash
-export OPENAI_API_KEY=your_openai_api_key # Required by the Agent
+export <PROVIDER>_API_KEY=your_<provider>_api_key # Required for the Agent
 mcpd config env set github GITHUB_PERSONAL_ACCESS_TOKEN=your_github_token # Required by the GitHub MCP server
 ```
 
