@@ -29,7 +29,7 @@ mcpd add github
 
 ### Step 4: Configure your agent's API key and the GitHub token for the MCP server
 ```bash
-export <PROVIDER>_API_KEY=your_<provider>_api_key # Required for the Agent
+export <PROVIDER>_API_KEY=your_<provider>_api_key # Required for the Agent, the example code currently uses Mistral.
 mcpd config env set github GITHUB_PERSONAL_ACCESS_TOKEN=your_github_token # Required by the GitHub MCP server
 ```
 
