@@ -34,6 +34,12 @@ Then run:
 uv sync
 ```
 
+## Testing
+
+```bash
+uv run pytest
+```
+
 ## Quick Start
 
 ```python
