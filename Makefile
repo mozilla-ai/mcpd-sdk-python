@@ -1,6 +1,4 @@
-.PHONY: setup test
-
-ensure-scripts-exec:
+.PHONY: ensure-scripts-exec setup test
 
 ensure-scripts-exec:
 	@chmod +x scripts/* || true
