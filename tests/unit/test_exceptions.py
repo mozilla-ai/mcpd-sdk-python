@@ -41,13 +41,13 @@ class TestMcpdError:
     def test_mcpd_error_chaining(self):
         """Test error chaining with McpdError."""
         original_error = ValueError("Original error")
-        
+
         try:
             raise original_error
         except ValueError as e:
             chained_error = McpdError("Chained error")
             chained_error.__cause__ = e
-            
+
         assert chained_error.__cause__ is original_error
         assert str(chained_error) == "Chained error"
 
@@ -56,30 +56,30 @@ class TestMcpdError:
         server_name = "test_server"
         tool_name = "test_tool"
         error = McpdError(f"Error calling tool '{tool_name}' on server '{server_name}'")
-        
+
         expected_message = "Error calling tool 'test_tool' on server 'test_server'"
         assert str(error) == expected_message
 
     def test_mcpd_error_attributes(self):
         """Test that McpdError has expected attributes."""
         error = McpdError("Test error")
-        
+
         # Should have standard Exception attributes
-        assert hasattr(error, 'args')
+        assert hasattr(error, "args")
         assert error.args == ("Test error",)
 
     def test_mcpd_error_repr(self):
         """Test string representation of McpdError."""
         error = McpdError("Test error")
         repr_str = repr(error)
-        
+
         assert "McpdError" in repr_str
         assert "Test error" in repr_str
 
     def test_mcpd_error_instance_check(self):
         """Test isinstance checks with McpdError."""
         error = McpdError("Test error")
-        
+
         assert isinstance(error, McpdError)
         assert isinstance(error, Exception)
         assert isinstance(error, BaseException)
@@ -89,7 +89,7 @@ class TestMcpdError:
         error1 = McpdError("Same message")
         error2 = McpdError("Same message")
         error3 = McpdError("Different message")
-        
+
         # Note: Exception instances are not equal even with same message
         # This is standard Python behavior
         assert error1 is not error2
@@ -99,7 +99,7 @@ class TestMcpdError:
         """Test McpdError with complex message containing various data types."""
         data = {"server": "test", "tool": "example", "params": [1, 2, 3]}
         error = McpdError(f"Complex error with data: {data}")
-        
+
         assert "Complex error with data:" in str(error)
         assert "test" in str(error)
         assert "example" in str(error)

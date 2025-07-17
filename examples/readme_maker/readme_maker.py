@@ -30,8 +30,8 @@ Create a new README file for the target repository ({target_repo}).
 If a template README file from an original repository ({input_repo_readme}) is provided:
 
 - Template Utilization: Use the structure and style of the original README file as a guide.
-- Content Adaptation: Modify the content to accurately describe the target repository. 
-This step requires analyzing the entire codebase of the target repository ({target_repo}) 
+- Content Adaptation: Modify the content to accurately describe the target repository.
+This step requires analyzing the entire codebase of the target repository ({target_repo})
 to understand its functionality, features, and any other relevant details that should be included in the README.
 
 If no template README file is provided:
@@ -45,7 +45,7 @@ README Creation: Generate a high-quality README file from scratch, including rel
 -License information
 -Acknowledgements (if applicable)
 
-To create the README, analyze the entire codebase of the target repository ({target_repo}) 
+To create the README, analyze the entire codebase of the target repository ({target_repo})
 to understand its functionality, features, and any other relevant details.
 
 After creating the new README file:
@@ -55,8 +55,8 @@ After creating the new README file:
  commit message that clearly indicates the addition of the new README.
 3. Pull Request (PR) Creation: Open a Pull Request against the main branch of the target
  repository, including the new README file.
-4. PR Description: In the Pull Request description, mention that the README was generated 
-by an AI agent of the model {agent_model}. If a template was used, include a link to 
+4. PR Description: In the Pull Request description, mention that the README was generated
+by an AI agent of the model {agent_model}. If a template was used, include a link to
 the original README template ({input_repo_readme}) used for generating the new README.
 
 When providing code snippets for this task, follow the guidelines for code modifications:
