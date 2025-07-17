@@ -1,6 +1,6 @@
 [project]
 name = "mcpd-sdk"
-version = "0.0.1"
+dynamic = ["version"]
 description = "mcpd Python SDK"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -23,6 +23,8 @@ lint = [
 
 tests = [
     "pytest>=8.3.5",
+    "setuptools>=80.9.0",
+    "setuptools-scm[toml]>=8.3.1",
 ]
 
 all = [
@@ -30,6 +32,18 @@ all = [
     { include-group = "lint" },
     { include-group = "tests" },
 ]
+
+[build-system]
+requires = ["setuptools>=48", "setuptools_scm[toml]>=6.3.1"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["tests", "tests.*"]
+where = ["src"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
 
 [tool.ruff]
 fix = true

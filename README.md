@@ -31,7 +31,37 @@ dependencies = [
 Then run:
 
 ```bash
+uv venv
+source .venv/bin/activate
 uv sync
+```
+
+## Dev Setup
+
+Use the `Makefile` target to ensure `uv` is installed, and your virtual environment is active and sync'd.
+
+```bash
+make setup
+```
+
+## Testing
+
+Ensure you have the correct dependencies installed for testing:
+
+```bash
+uv sync --group tests
+```
+
+Then to run all tests:
+
+```bash
+uv run pytest tests
+```
+
+... or via `Makefile`:
+
+```bash
+make test
 ```
 
 ## Quick Start
