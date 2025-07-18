@@ -2,8 +2,8 @@ from types import FunctionType
 
 import pytest
 
-from mcpd_sdk.exceptions import McpdError
-from mcpd_sdk.function_builder import FunctionBuilder
+from mcpd.exceptions import McpdError
+from mcpd.function_builder import FunctionBuilder
 
 
 class TestFunctionBuilder:

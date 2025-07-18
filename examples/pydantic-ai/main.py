@@ -1,7 +1,7 @@
 import os
 
 import requests
-from mcpd_sdk import McpdClient, McpdError
+from mcpd import McpdClient, McpdError
 from pydantic_ai import Agent
 
 if __name__ == "__main__":

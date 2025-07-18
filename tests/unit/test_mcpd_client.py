@@ -4,7 +4,7 @@ import pytest
 from requests import Session
 from requests.exceptions import RequestException
 
-from mcpd_sdk import McpdClient, McpdError
+from mcpd import McpdClient, McpdError
 
 
 class TestMcpdClient:

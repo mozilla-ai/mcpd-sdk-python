@@ -144,7 +144,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mcpd-sdk"
+name = "mcpd"
 source = { editable = "." }
 dependencies = [
     { name = "requests" },

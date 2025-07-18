@@ -1,5 +1,5 @@
 [project]
-name = "mcpd-sdk"
+name = "mcpd"
 dynamic = ["version"]
 description = "mcpd Python SDK"
 readme = "README.md"
