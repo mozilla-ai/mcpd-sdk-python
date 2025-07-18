@@ -14,26 +14,12 @@ This SDK provides high-level and dynamic access to those tools, making it easy t
 - Generate self-contained, deepcopy-safe tool functions for frameworks like [any-agent](https://github.com/mozilla-ai/any-agent)
 - Minimal dependencies (`requests` only)
 
-## Installation
+## Installation in your project
 
 Assuming you are using [uv](https://github.com/astral-sh/uv), include it in your `pyproject.toml`:
 
-```toml
-[tool.uv.sources]
-mcpd = { path = "../mcpd", editable = true }
-
-[project]
-dependencies = [
-  "mcpd"
-]
-```
-
-Then run:
-
 ```bash
-uv venv
-source .venv/bin/activate
-uv sync
+uv add mcpd
 ```
 
 ## Dev Setup
