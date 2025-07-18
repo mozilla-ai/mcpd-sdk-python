@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from mcpd_sdk import McpdClient
+from mcpd import McpdClient
 from pydantic_ai import Agent
 
 load_dotenv()  # Load the API key for the agent (using Mistral in this case)

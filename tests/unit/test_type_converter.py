@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from mcpd_sdk.type_converter import TypeConverter
+from mcpd.type_converter import TypeConverter
 
 
 class TestTypeConverter:

@@ -20,11 +20,11 @@ Assuming you are using [uv](https://github.com/astral-sh/uv), include it in your
 
 ```toml
 [tool.uv.sources]
-mcpd_sdk = { path = "../mcpd-sdk", editable = true }
+mcpd = { path = "../mcpd", editable = true }
 
 [project]
 dependencies = [
-  "mcpd_sdk"
+  "mcpd"
 ]
 ```
 
@@ -67,7 +67,7 @@ make test
 ## Quick Start
 
 ```python
-from mcpd_sdk import McpdClient, McpdError
+from mcpd import McpdClient, McpdError
 
 client = McpdClient(endpoint="http://localhost:8090")
 
@@ -93,14 +93,14 @@ Generate dynamic functions suitable for AI agents:
 
 ```python
 from any_agent import AnyAgent, AgentConfig
-from mcpd_sdk import McpdClient
+from mcpd import McpdClient
 
 # Assumes the mcpd daemon is running
 client = McpdClient(endpoint="http://localhost:8090")
 
 agent_config = AgentConfig(
     tools=client.agent_tools(),
-    model_id="gpt-4.1-nano", # Requires OPENAI_API_KEY to be set
+    model_id="gpt-4.1-nano",  # Requires OPENAI_API_KEY to be set
     instructions="Use the tools to answer the user's question."
 )
 agent = AnyAgent.create("mcpd-agent", agent_config)
@@ -125,7 +125,7 @@ please refer to the relevant example for execution details.
 ### Initialization
 
 ```python
-from mcpd_sdk import McpdClient
+from mcpd import McpdClient
 
 # Initialize the client with your mcpd API endpoint.
 # api_key is optional and sends an 'MCPD-API-KEY' header.

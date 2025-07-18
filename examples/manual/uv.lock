@@ -118,7 +118,7 @@ name = "example-manual-use"
 version = "0.0.1"
 source = { virtual = "." }
 dependencies = [
-    { name = "mcpd-sdk" },
+    { name = "mcpd" },
     { name = "requests" },
 ]
 
@@ -145,7 +145,7 @@ tests = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mcpd-sdk", editable = "../../" },
+    { name = "mcpd", editable = "../../" },
     { name = "requests", specifier = ">=2.32.4" },
 ]
 
@@ -205,8 +205,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mcpd-sdk"
-version = "0.0.1"
+name = "mcpd"
 source = { editable = "../../" }
 dependencies = [
     { name = "requests" },
@@ -221,18 +220,26 @@ all = [
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "ruff", specifier = ">=0.11.13" },
+    { name = "setuptools", specifier = ">=80.9.0" },
+    { name = "setuptools-scm", extras = ["toml"], specifier = ">=8.3.1" },
 ]
 dev = [
     { name = "debugpy", specifier = ">=1.8.14" },
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "ruff", specifier = ">=0.11.13" },
+    { name = "setuptools", specifier = ">=80.9.0" },
+    { name = "setuptools-scm", extras = ["toml"], specifier = ">=8.3.1" },
 ]
 lint = [
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "ruff", specifier = ">=0.11.13" },
 ]
-tests = [{ name = "pytest", specifier = ">=8.3.5" }]
+tests = [
+    { name = "pytest", specifier = ">=8.3.5" },
+    { name = "setuptools", specifier = ">=80.9.0" },
+    { name = "setuptools-scm", extras = ["toml"], specifier = ">=8.3.1" },
+]
 
 [[package]]
 name = "nodeenv"

@@ -2,7 +2,7 @@ import json
 import os
 
 import requests
-from mcpd_sdk import McpdClient, McpdError
+from mcpd import McpdClient, McpdError
 
 if __name__ == "__main__":
     mcpd_endpoint = os.getenv("MCPD_ADDR", "http://localhost:8090")

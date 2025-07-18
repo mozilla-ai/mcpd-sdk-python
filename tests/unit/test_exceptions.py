@@ -1,6 +1,6 @@
 import pytest
 
-from mcpd_sdk.exceptions import McpdError
+from mcpd.exceptions import McpdError
 
 
 class TestMcpdError:

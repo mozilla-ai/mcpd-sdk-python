@@ -1,7 +1,7 @@
 import pytest
 
-from mcpd_sdk import McpdError
-from mcpd_sdk.dynamic_caller import DynamicCaller, ServerProxy
+from mcpd import McpdError
+from mcpd.dynamic_caller import DynamicCaller, ServerProxy
 
 
 class TestDynamicCaller:
