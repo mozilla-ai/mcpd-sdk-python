@@ -10,21 +10,21 @@ from mcpd import McpdClient, McpdError
 class TestMcpdClient:
     def test_init_basic(self):
         client = McpdClient(api_endpoint="http://localhost:9999")
-        assert client.endpoint == "http://localhost:9999"
-        assert client.api_key is None
-        assert hasattr(client, "session")
+        assert client._endpoint == "http://localhost:9999"
+        assert client._api_key is None
+        assert hasattr(client, "_session")
         assert hasattr(client, "call")
 
     def test_init_with_auth(self):
         client = McpdClient(api_endpoint="http://localhost:9090", api_key="test-key123")
-        assert client.endpoint == "http://localhost:9090"
-        assert client.api_key == "test-key123"  # pragma: allowlist secret
-        assert "Authorization" in client.session.headers
-        assert client.session.headers["Authorization"] == "Bearer test-key123"
+        assert client._endpoint == "http://localhost:9090"
+        assert client._api_key == "test-key123"  # pragma: allowlist secret
+        assert "Authorization" in client._session.headers
+        assert client._session.headers["Authorization"] == "Bearer test-key123"  # pragma: allowlist secret
 
     def test_init_strips_trailing_slash(self):
         client = McpdClient("http://localhost:8090/")
-        assert client.endpoint == "http://localhost:8090"
+        assert client._endpoint == "http://localhost:8090"
 
     @patch.object(Session, "get")
     def test_servers_success(self, mock_get, client, api_url):

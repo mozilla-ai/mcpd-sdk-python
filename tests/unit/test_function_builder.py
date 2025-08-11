@@ -70,7 +70,7 @@ class TestFunctionBuilder:
         result = func(param1="test_value")
 
         assert result == {"result": "success"}
-        function_builder.client._perform_call.assert_called_once_with(
+        function_builder._client._perform_call.assert_called_once_with(
             "test_server", "test_tool", {"param1": "test_value"}
         )
 
@@ -108,11 +108,11 @@ class TestFunctionBuilder:
 
         # Test with only required param
         result = func(param1="test")
-        function_builder.client._perform_call.assert_called_with("test_server", "test_tool", {"param1": "test"})
+        function_builder._client._perform_call.assert_called_with("test_server", "test_tool", {"param1": "test"})
 
         # Test with optional param
         result = func(param1="test", param2="optional")
-        function_builder.client._perform_call.assert_called_with(
+        function_builder._client._perform_call.assert_called_with(
             "test_server", "test_tool", {"param1": "test", "param2": "optional"}
         )
 
@@ -126,7 +126,7 @@ class TestFunctionBuilder:
         func = function_builder.create_function_from_schema(schema, "test_server")
         result = func()
 
-        function_builder.client._perform_call.assert_called_once_with("test_server", "test_tool", {})
+        function_builder._client._perform_call.assert_called_once_with("test_server", "test_tool", {})
 
     def test_create_function_from_schema_caching(self, function_builder):
         schema = {
@@ -200,7 +200,7 @@ class TestFunctionBuilder:
 
         assert "McpdError" in namespace
         assert "client" in namespace
-        assert namespace["client"] is function_builder.client
+        assert namespace["client"] is function_builder._client
         assert "Any" in namespace
         assert "str" in namespace
         assert "int" in namespace
