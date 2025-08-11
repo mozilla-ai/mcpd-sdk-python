@@ -55,7 +55,7 @@ make test
 ```python
 from mcpd import McpdClient, McpdError
 
-client = McpdClient(endpoint="http://localhost:8090")
+client = McpdClient(api_endpoint="http://localhost:8090")
 
 # List available servers
 print(client.servers())
@@ -82,7 +82,7 @@ from any_agent import AnyAgent, AgentConfig
 from mcpd import McpdClient
 
 # Assumes the mcpd daemon is running
-client = McpdClient(endpoint="http://localhost:8090")
+client = McpdClient(api_endpoint="http://localhost:8090")
 
 agent_config = AgentConfig(
     tools=client.agent_tools(),
