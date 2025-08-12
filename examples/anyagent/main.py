@@ -1,3 +1,5 @@
+"""Example demonstrating mcpd SDK integration with AnyAgent framework."""
+
 import os
 
 import requests

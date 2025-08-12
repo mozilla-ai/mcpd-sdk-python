@@ -1,3 +1,5 @@
+"""Example demonstrating mcpd SDK integration with Pydantic AI framework."""
+
 import os
 
 import requests

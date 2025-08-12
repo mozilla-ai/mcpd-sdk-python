@@ -1,3 +1,5 @@
+"""Example demonstrating README generation using mcpd SDK with AI agents."""
+
 from dotenv import load_dotenv
 from mcpd import McpdClient
 from pydantic_ai import Agent
@@ -21,7 +23,8 @@ target_repo = input(
 )
 
 input_repo_readme = input(
-    "(Optional) Enter the GitHub repository (in the format owner/repo-name) to use its README as a template (press Enter to let the LLM define the structure): "
+    "(Optional) Enter the GitHub repository (in the format owner/repo-name) to use its README "
+    "as a template (press Enter to let the LLM define the structure): "
 )
 
 prompt = f"""
@@ -62,8 +65,10 @@ the original README template ({input_repo_readme}) used for generating the new R
 When providing code snippets for this task, follow the guidelines for code modifications:
 
 - Always specify the language and file name in the info string of code blocks (e.g., python src/main.py).
-- For code modifications, use concise snippets that highlight the necessary changes, with abbreviated placeholders for unmodified sections.
-- When editing existing files, restate the relevant function or class and use 'lazy' comments to omit unmodified portions.
+- For code modifications, use concise snippets that highlight the necessary changes, with abbreviated
+  placeholders for unmodified sections.
+- When editing existing files, restate the relevant function or class and use 'lazy' comments to omit
+  unmodified portions.
 
 Please provide a concise explanation of the changes made unless explicitly asked for code only
 """
