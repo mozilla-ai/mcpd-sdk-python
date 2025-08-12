@@ -107,11 +107,11 @@ class TestFunctionBuilder:
         func = function_builder.create_function_from_schema(schema, "test_server")
 
         # Test with only required param
-        result = func(param1="test")
+        _ = func(param1="test")
         function_builder._client._perform_call.assert_called_with("test_server", "test_tool", {"param1": "test"})
 
         # Test with optional param
-        result = func(param1="test", param2="optional")
+        _ = func(param1="test", param2="optional")
         function_builder._client._perform_call.assert_called_with(
             "test_server", "test_tool", {"param1": "test", "param2": "optional"}
         )
@@ -124,7 +124,7 @@ class TestFunctionBuilder:
         }
 
         func = function_builder.create_function_from_schema(schema, "test_server")
-        result = func()
+        _ = func()
 
         function_builder._client._perform_call.assert_called_once_with("test_server", "test_tool", {})
 
@@ -157,7 +157,7 @@ class TestFunctionBuilder:
 
         annotations = function_builder._create_annotations(schema)
 
-        assert annotations["str_param"] == str
+        assert annotations["str_param"] is str
         assert annotations["int_param"] == (int | None)
         assert annotations["bool_param"] == (bool | None)
 

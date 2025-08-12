@@ -1,0 +1,77 @@
+# Ruff configuration for mcpd Python SDK
+target-version = "py311"
+src = ["src"]
+line-length = 120
+include = ["*.py", "*.pyi"]
+# Enable auto-fixing
+fix = true
+
+# Exclude common directories
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+[lint]
+
+# Select rules to enforce
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "I",    # isort (import sorting)
+    "N",    # pep8-naming
+    "ISC",  # flake8-implicit-str-concat
+    "PTH",  # flake8-use-pathlib
+    "D",    # pydocstyle (docstrings)
+]
+
+# Rules to ignore
+ignore = [
+    # No ignored rules - we want strict enforcement for a public SDK
+]
+
+# Rules that should not be auto-fixed
+unfixable = [
+    "B",    # flake8-bugbear (safety-related, should be manually reviewed)
+    "F841", # unused variables (might indicate logic issues)
+]
+
+# Per-file ignores
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+"tests/**" = [
+    "D",      # Don't require docstrings in tests
+    "N999",   # Allow invalid module names in tests
+]
+
+[lint.pydocstyle]
+# Use Google docstring convention
+convention = "google"
+
+[format]
+# Formatting preferences
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

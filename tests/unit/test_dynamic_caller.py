@@ -52,7 +52,7 @@ class TestServerProxy:
         mock_client.has_tool.return_value = False
 
         with pytest.raises(McpdError, match="Tool 'nonexistent_tool' not found on server 'test_server'"):
-            server_proxy.nonexistent_tool
+            _ = server_proxy.nonexistent_tool
 
     def test_tool_function_execution(self, server_proxy, mock_client):
         mock_client.has_tool.return_value = True
@@ -113,8 +113,8 @@ class TestServerProxy:
         mock_client.has_tool.return_value = True
 
         # Access the same tool multiple times
-        tool1 = server_proxy.test_tool
-        tool2 = server_proxy.test_tool
+        _ = server_proxy.test_tool
+        _ = server_proxy.test_tool
 
         # has_tool should be called each time
         assert mock_client.has_tool.call_count == 2
@@ -156,8 +156,6 @@ class TestIntegration:
         assert result3 == {"result": "success"}
 
         # Verify all calls were made correctly
-        expected_calls = [(("server1", "tool1"), {}), (("server2", "tool2"), {}), (("server1", "tool3"), {})]
-
         has_tool_calls = mock_client.has_tool.call_args_list
         perform_call_calls = mock_client._perform_call.call_args_list
 

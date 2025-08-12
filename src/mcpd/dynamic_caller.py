@@ -1,9 +1,25 @@
-from .exceptions import McpdError, ToolNotFoundError
+"""Dynamic tool invocation for mcpd client.
+
+This module provides the DynamicCaller and ServerProxy classes that enable
+natural Python syntax for calling MCP tools, such as:
+    client.call.server.tool(**kwargs)
+
+The dynamic calling system uses Python's __getattr__ magic method to create
+a fluent interface that resolves server and tool names at runtime.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from .exceptions import ToolNotFoundError
+
+if TYPE_CHECKING:
+    from .mcpd_client import McpdClient
 
 
 class DynamicCaller:
-    """
-    Enables dynamic, attribute-based tool invocation using natural Python syntax.
+    """Enables dynamic, attribute-based tool invocation using natural Python syntax.
 
     This class provides the magic behind the client.call.<server>.<tool>(**kwargs) syntax,
     allowing you to call MCP tools as if they were native Python methods. It uses Python's
@@ -33,18 +49,16 @@ class DynamicCaller:
         to check availability before calling if needed.
     """
 
-    def __init__(self, client: "McpdClient"):
-        """
-        Initialize the DynamicCaller with a reference to the client.
+    def __init__(self, client: McpdClient):
+        """Initialize the DynamicCaller with a reference to the client.
 
         Args:
             client: The McpdClient instance that owns this DynamicCaller.
         """
         self._client = client
 
-    def __getattr__(self, server_name: str) -> "ServerProxy":
-        """
-        Create a ServerProxy for the specified server name.
+    def __getattr__(self, server_name: str) -> ServerProxy:
+        """Create a ServerProxy for the specified server name.
 
         This method is called when accessing an attribute on the DynamicCaller,
         e.g., client.call.time returns a ServerProxy for the "time" server.
@@ -64,8 +78,7 @@ class DynamicCaller:
 
 
 class ServerProxy:
-    """
-    Proxy for a specific MCP server, enabling tool invocation via attributes.
+    """Proxy for a specific MCP server, enabling tool invocation via attributes.
 
     This class represents a specific MCP server and allows calling its tools
     as if they were methods. It's created automatically by DynamicCaller and
@@ -86,9 +99,8 @@ class ServerProxy:
         >>> current_time = client.call.time.get_current_time(timezone="UTC")
     """
 
-    def __init__(self, client: "McpdClient", server_name: str):
-        """
-        Initialize a ServerProxy for a specific server.
+    def __init__(self, client: McpdClient, server_name: str):
+        """Initialize a ServerProxy for a specific server.
 
         Args:
             client: The McpdClient instance to use for API calls.
@@ -98,8 +110,7 @@ class ServerProxy:
         self._server_name = server_name
 
     def __getattr__(self, tool_name: str) -> callable:
-        """
-        Create a callable function for the specified tool.
+        """Create a callable function for the specified tool.
 
         When you access an attribute on a ServerProxy (e.g., time_server.get_current_time),
         this method creates and returns a function that will call that tool when invoked.
@@ -135,8 +146,7 @@ class ServerProxy:
             )
 
         def tool_function(**kwargs):
-            """
-            Execute the MCP tool with the provided parameters.
+            """Execute the MCP tool with the provided parameters.
 
             Args:
                 **kwargs: Tool parameters as keyword arguments.

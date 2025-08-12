@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from mcpd import McpdClient, McpdError
+from mcpd import McpdClient
 
 
 @pytest.fixture(scope="function")
