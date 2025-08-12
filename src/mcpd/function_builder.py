@@ -249,13 +249,13 @@ class FunctionBuilder:
             def server__get_time(timezone):
                 '''Get current time
 
-        Args:
+                Args:
                     timezone: No description provided
 
-        Returns:
+                Returns:
                     Any: Function execution result
 
-        Raises:
+                Raises:
                     ValidationError: If required parameters are missing
                     McpdError: If the API call fails
                 '''
@@ -290,7 +290,7 @@ class FunctionBuilder:
             The generated code uses string interpolation and list literals to embed
             the schema data directly into the function code. This creates a completely
             self-contained function that doesn't depend on the original schema object.
-        """
+        """  # noqa: D214
         function_name = self._function_name(server_name, schema["name"])
         input_schema = schema.get("inputSchema", {})
         properties = input_schema.get("properties", {})
@@ -461,17 +461,16 @@ class FunctionBuilder:
             ```
 
             Generates a docstring like:
-            ```
-            Search for items in database
+            ```Search for items in database
 
-        Args:
+            Args:
                 query: Search query string
                 limit: Maximum results to return (optional)
 
-        Returns:
+            Returns:
                 Any: Function execution result
 
-        Raises:
+            Raises:
                 ValidationError: If required parameters are missing
                 McpdError: If the API call fails
             ```
@@ -481,7 +480,7 @@ class FunctionBuilder:
             - Optional parameters are marked with "(optional)" suffix
             - The Raises section accurately documents both validation and execution errors
             - Empty properties result in a docstring without an Args section
-        """
+        """  # noqa: D214
         description = schema.get("description", "No description provided")
         input_schema = schema.get("inputSchema", {})
         properties = input_schema.get("properties", {})
