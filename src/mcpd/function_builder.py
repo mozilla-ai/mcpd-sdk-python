@@ -1,14 +1,28 @@
+"""Function generation from MCP tool schemas.
+
+This module provides the FunctionBuilder class that dynamically generates
+callable Python functions from MCP tool JSON Schema definitions. These
+functions can be used with AI agent frameworks and include proper parameter
+validation, type annotations, and comprehensive docstrings.
+
+The generated functions are self-contained and cached for performance.
+"""
+
+from __future__ import annotations
+
 import re
 from types import FunctionType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .exceptions import McpdError, ValidationError
 from .type_converter import TypeConverter
 
+if TYPE_CHECKING:
+    from .mcpd_client import McpdClient
+
 
 class FunctionBuilder:
-    """
-    Builds callable Python functions from MCP tool JSON schemas.
+    """Builds callable Python functions from MCP tool JSON schemas.
 
     This class generates self-contained functions that can be used with AI agent
     frameworks. It uses dynamic string compilation to create functions with proper
@@ -32,9 +46,8 @@ class FunctionBuilder:
         >>> result = func(timezone="UTC")  # Executes the MCP tool
     """
 
-    def __init__(self, client: "McpdClient"):
-        """
-        Initialize a FunctionBuilder for the given client.
+    def __init__(self, client: McpdClient):
+        """Initialize a FunctionBuilder for the given client.
 
         Args:
             client: The McpdClient instance that will be used to execute
@@ -44,8 +57,7 @@ class FunctionBuilder:
         self._function_cache = {}
 
     def _safe_name(self, name: str) -> str:
-        """
-        Convert a string into a safe Python identifier.
+        """Convert a string into a safe Python identifier.
 
         This method sanitizes arbitrary strings (like server names or tool names) to create
         valid Python identifiers that can be used as function names or variable names.
@@ -73,8 +85,7 @@ class FunctionBuilder:
         return re.sub(r"\W|^(?=\d)", "_", name)  # replace non‑word chars, leading digit
 
     def _function_name(self, server_name: str, schema_name: str) -> str:
-        """
-        Generate a unique function name from server and tool names.
+        """Generate a unique function name from server and tool names.
 
         This method creates a qualified function name by combining the server name
         and tool name with a double underscore separator. Both names are sanitized
@@ -106,8 +117,7 @@ class FunctionBuilder:
         return f"{self._safe_name(server_name)}__{self._safe_name(schema_name)}"
 
     def create_function_from_schema(self, schema: dict[str, Any], server_name: str) -> FunctionType:
-        """
-        Create a callable Python function from an MCP tool's JSON Schema definition.
+        """Create a callable Python function from an MCP tool's JSON Schema definition.
 
         This method generates a self-contained, callable function that validates parameters
         and executes the corresponding MCP tool. The function is dynamically compiled from
@@ -197,8 +207,7 @@ class FunctionBuilder:
             raise McpdError(f"Error creating function {cache_key}: {e}") from e
 
     def _build_function_code(self, schema: dict[str, Any], server_name: str) -> str:
-        """
-        Generate Python function source code from an MCP tool's JSON Schema.
+        """Generate Python function source code from an MCP tool's JSON Schema.
 
         This method is the core of the dynamic function generation system. It creates
         a complete Python function as a string that includes parameter validation,
@@ -260,7 +269,10 @@ class FunctionBuilder:
                         missing_params.append(param)
 
                 if missing_params:
-                    raise ValidationError(f"Missing required parameters: {missing_params}", validation_errors=missing_params)
+                    raise ValidationError(
+                        f"Missing required parameters: {missing_params}",
+                        validation_errors=missing_params,
+                    )
 
                 # Build parameters dictionary
                 params = {}
@@ -278,15 +290,15 @@ class FunctionBuilder:
             The generated code uses string interpolation and list literals to embed
             the schema data directly into the function code. This creates a completely
             self-contained function that doesn't depend on the original schema object.
-        """
+        """  # noqa: D214
         function_name = self._function_name(server_name, schema["name"])
         input_schema = schema.get("inputSchema", {})
         properties = input_schema.get("properties", {})
         required_params = set(input_schema.get("required", []))
 
         # Sort parameters: required first, then optional
-        required_param_names = [p for p in properties.keys() if p in required_params]
-        optional_param_names = [p for p in properties.keys() if p not in required_params]
+        required_param_names = [p for p in properties if p in required_params]
+        optional_param_names = [p for p in properties if p not in required_params]
         sorted_param_names = required_param_names + optional_param_names
         param_declarations = []
 
@@ -314,7 +326,10 @@ class FunctionBuilder:
             "            missing_params.append(param)",
             "",
             "    if missing_params:",
-            '        raise ValidationError(f"Missing required parameters: {missing_params}", validation_errors=missing_params)',
+            "        raise ValidationError(",
+            '            f"Missing required parameters: {missing_params}",',
+            "            validation_errors=missing_params,",
+            "        )",
             "",
             "    # Build parameters dictionary",
             "    params = {}",
@@ -331,13 +346,12 @@ class FunctionBuilder:
         return "\n".join(function_lines)
 
     def _create_annotations(self, schema: dict[str, Any]) -> dict[str, Any]:
-        """
-        Generate Python type annotations from a tool's JSON Schema.
+        """Generate Python type annotations from a tool's JSON Schema.
 
         This method converts JSON Schema type definitions into Python type hints
         that are attached to the generated function. It uses the TypeConverter
         utility to handle complex schema types and properly marks optional
-        parameters with Union[type, None] notation.
+        parameters with modern union syntax (type | None).
 
         The method processes each parameter in the schema's properties, determines
         if it's required, and creates appropriate type annotations. Required
@@ -404,8 +418,7 @@ class FunctionBuilder:
         return annotations
 
     def _create_docstring(self, schema: dict[str, Any]) -> str:
-        """
-        Generate a comprehensive docstring for the dynamically created function.
+        """Generate a comprehensive docstring for the dynamically created function.
 
         This method builds a properly formatted Python docstring that includes the
         tool's description, parameter documentation with optional/required status,
@@ -448,8 +461,7 @@ class FunctionBuilder:
             ```
 
             Generates a docstring like:
-            ```
-            Search for items in database
+            ```Search for items in database
 
             Args:
                 query: Search query string
@@ -468,7 +480,7 @@ class FunctionBuilder:
             - Optional parameters are marked with "(optional)" suffix
             - The Raises section accurately documents both validation and execution errors
             - Empty properties result in a docstring without an Args section
-        """
+        """  # noqa: D214
         description = schema.get("description", "No description provided")
         input_schema = schema.get("inputSchema", {})
         properties = input_schema.get("properties", {})
@@ -501,8 +513,7 @@ class FunctionBuilder:
         return "\n".join(docstring_parts)
 
     def _create_namespace(self) -> dict[str, Any]:
-        """
-        Create the execution namespace for dynamically generated functions.
+        """Create the execution namespace for dynamically generated functions.
 
         This method builds a dictionary containing all the Python built-ins, types,
         and references that the generated function code needs at runtime. The namespace
@@ -563,8 +574,7 @@ class FunctionBuilder:
         }
 
     def clear_cache(self) -> None:
-        """
-        Clear the internal function compilation cache.
+        """Clear the internal function compilation cache.
 
         This method removes all cached function templates created by previous calls
         to create_function_from_schema(). After clearing, subsequent calls to

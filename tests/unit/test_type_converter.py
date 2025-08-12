@@ -6,7 +6,7 @@ from mcpd.type_converter import TypeConverter
 class TestTypeConverter:
     def test_json_type_to_python_type_string(self):
         result = TypeConverter.json_type_to_python_type("string", {})
-        assert result == str
+        assert result is str
 
     def test_json_type_to_python_type_string_with_enum(self):
         schema = {"enum": ["option1", "option2", "option3"]}
@@ -29,11 +29,17 @@ class TestTypeConverter:
 
     def test_json_type_to_python_type_integer(self):
         result = TypeConverter.json_type_to_python_type("integer", {})
-        assert result == int
+        assert result is int
 
     def test_json_type_to_python_type_boolean(self):
         result = TypeConverter.json_type_to_python_type("boolean", {})
-        assert result == bool
+        assert result is bool
+
+    def test_json_type_to_python_type_null(self):
+        from types import NoneType
+
+        result = TypeConverter.json_type_to_python_type("null", {})
+        assert result is NoneType
 
     def test_json_type_to_python_type_array_with_items(self):
         schema = {"items": {"type": "string"}}
@@ -55,7 +61,7 @@ class TestTypeConverter:
     def test_parse_schema_type_simple_type(self):
         schema = {"type": "string"}
         result = TypeConverter.parse_schema_type(schema)
-        assert result == str
+        assert result is str
 
     def test_parse_schema_type_anyof_simple(self):
         schema = {"anyOf": [{"type": "string"}, {"type": "integer"}]}
@@ -136,4 +142,6 @@ class TestTypeConverter:
         schema = {"anyOf": [{"type": "string"}, {"type": "null"}]}
         result = TypeConverter.parse_schema_type(schema)
         # Should handle null type properly
-        assert result == (str | Any)  # null maps to Any in this implementation
+        from types import NoneType
+
+        assert result == (str | NoneType)  # null maps to NoneType

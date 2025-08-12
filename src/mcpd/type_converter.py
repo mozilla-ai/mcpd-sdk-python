@@ -1,5 +1,16 @@
+"""JSON Schema to Python type conversion utilities.
+
+This module provides the TypeConverter class that handles conversion between
+JSON Schema type definitions and Python type annotations. It supports all
+standard JSON Schema types including complex constructs like unions (anyOf)
+and properly maps nullable types to Python's type system.
+
+Used primarily by the FunctionBuilder to create accurate type annotations
+for dynamically generated functions.
+"""
+
 from types import NoneType
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 
 class TypeConverter:
@@ -7,7 +18,18 @@ class TypeConverter:
 
     @staticmethod
     def json_type_to_python_type(json_type: str, schema_def: dict[str, Any]) -> Any:
-        """Convert JSON schema types to Python type annotations."""
+        """Convert JSON schema types to Python type annotations.
+
+        Maps JSON Schema types to their Python equivalents:
+        - "string" → str (or Literal for enums)
+        - "integer" → int
+        - "number" → int | float
+        - "boolean" → bool
+        - "array" → list[T]
+        - "object" → dict[str, Any]
+        - "null" → NoneType
+        - unknown types → Any
+        """
         if json_type == "string":
             if "enum" in schema_def:
                 enum_values = tuple(schema_def["enum"])
@@ -33,6 +55,8 @@ class TypeConverter:
             return list[Any]
         elif json_type == "object":
             return dict[str, Any]
+        elif json_type == "null":
+            return NoneType
         else:
             return Any
 

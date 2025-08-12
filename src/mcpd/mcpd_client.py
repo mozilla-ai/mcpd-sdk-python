@@ -1,4 +1,16 @@
-from typing import Any, Callable, Union
+"""mcpd client for MCP server management and tool execution.
+
+This module provides the main McpdClient class that interfaces with the mcpd
+daemon to manage interactions with MCP servers and execute tools. It offers
+multiple interaction patterns including direct API calls, dynamic calling
+syntax, and agent-ready function generation.
+
+The client handles authentication, error management, and provides a unified
+interface for working with multiple MCP servers through the mcpd daemon.
+"""
+
+from collections.abc import Callable
+from typing import Any
 
 import requests
 
@@ -15,8 +27,7 @@ from .function_builder import FunctionBuilder
 
 
 class McpdClient:
-    """
-    Client for interacting with MCP (Model Context Protocol) servers through an mcpd daemon.
+    """Client for interacting with MCP (Model Context Protocol) servers through an mcpd daemon.
 
     The McpdClient provides a high-level interface to discover, inspect, and invoke tools
     exposed by MCP servers running behind an mcpd daemon proxy/gateway.
@@ -40,8 +51,7 @@ class McpdClient:
     """
 
     def __init__(self, api_endpoint: str, api_key: str | None = None):
-        """
-        Initialize a new McpdClient instance.
+        """Initialize a new McpdClient instance.
 
         Args:
             api_endpoint: The base URL of the mcpd daemon (e.g., "http://localhost:8090").
@@ -79,8 +89,7 @@ class McpdClient:
         self.call = DynamicCaller(self)
 
     def _perform_call(self, server_name: str, tool_name: str, params: dict[str, Any]) -> Any:
-        """
-        Perform the actual API call to execute a tool on an MCP server.
+        """Perform the actual API call to execute a tool on an MCP server.
 
         This method handles the low-level HTTP communication with the mcpd daemon
         and maps various failure modes to specific exception types. It is used
@@ -128,7 +137,7 @@ class McpdClient:
             raise ConnectionError(f"Cannot connect to mcpd daemon at {self._endpoint}: {e}") from e
         except requests.exceptions.Timeout as e:
             raise TimeoutError(
-                f"Tool execution timed out after 30 seconds", operation=f"{server_name}.{tool_name}", timeout=30
+                "Tool execution timed out after 30 seconds", operation=f"{server_name}.{tool_name}", timeout=30
             ) from e
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
@@ -153,8 +162,7 @@ class McpdClient:
             raise McpdError(f"Error calling tool '{tool_name}' on server '{server_name}': {e}") from e
 
     def servers(self) -> list[str]:
-        """
-        Retrieve a list of all available MCP server names.
+        """Retrieve a list of all available MCP server names.
 
         Queries the mcpd daemon to discover all configured and running MCP servers.
         Server names can be used with other methods to inspect tools or invoke them.
@@ -187,7 +195,7 @@ class McpdClient:
         except requests.exceptions.ConnectionError as e:
             raise ConnectionError(f"Cannot connect to mcpd daemon at {self._endpoint}: {e}") from e
         except requests.exceptions.Timeout as e:
-            raise TimeoutError(f"Request timed out after 5 seconds", operation="list servers", timeout=5) from e
+            raise TimeoutError("Request timed out after 5 seconds", operation="list servers", timeout=5) from e
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 raise AuthenticationError(f"Authentication failed: {e}") from e
@@ -203,8 +211,7 @@ class McpdClient:
             raise McpdError(f"Error listing servers: {e}") from e
 
     def tools(self, server_name: str | None = None) -> dict[str, list[dict]] | list[dict]:
-        """
-        Retrieve tool schema definitions from one or all MCP servers.
+        """Retrieve tool schema definitions from one or all MCP servers.
 
         Tool schemas describe the available tools, their parameters, and expected types.
         These schemas follow the JSON Schema specification and can be used to validate
@@ -279,7 +286,7 @@ class McpdClient:
             raise ConnectionError(f"Cannot connect to mcpd daemon at {self._endpoint}: {e}") from e
         except requests.exceptions.Timeout as e:
             raise TimeoutError(
-                f"Request timed out after 5 seconds", operation=f"list tools for {server_name}", timeout=5
+                "Request timed out after 5 seconds", operation=f"list tools for {server_name}", timeout=5
             ) from e
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
@@ -292,8 +299,7 @@ class McpdClient:
             raise McpdError(f"Error listing tool definitions for server '{server_name}': {e}") from e
 
     def agent_tools(self) -> list[Callable[..., Any]]:
-        """
-        Generate callable Python functions for all available tools, suitable for AI agents.
+        """Generate callable Python functions for all available tools, suitable for AI agents.
 
         This method queries all servers via `tools()` and creates self-contained,
         deepcopy-safe functions that can be passed to agentic frameworks like any-agent,
@@ -356,8 +362,7 @@ class McpdClient:
         return agent_tools
 
     def has_tool(self, server_name: str, tool_name: str) -> bool:
-        """
-        Check if a specific tool exists on a given server.
+        """Check if a specific tool exists on a given server.
 
         This method queries the server's tool definitions via tools(server_name) and
         searches for the specified tool. It's useful for validation before attempting
@@ -395,8 +400,7 @@ class McpdClient:
             return False
 
     def clear_agent_tools_cache(self) -> None:
-        """
-        Clear the cache of generated callable functions from agent_tools().
+        """Clear the cache of generated callable functions from agent_tools().
 
         This method clears the internal FunctionBuilder cache that stores compiled
         function templates. Call this when server configurations have changed to

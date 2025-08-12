@@ -1,5 +1,4 @@
-"""
-Exception hierarchy for the mcpd SDK.
+"""Exception hierarchy for the mcpd SDK.
 
 This module provides a structured exception hierarchy to help users handle
 different error scenarios appropriately.
@@ -7,8 +6,7 @@ different error scenarios appropriately.
 
 
 class McpdError(Exception):
-    """
-    Base exception for all mcpd SDK errors.
+    """Base exception for all mcpd SDK errors.
 
     This exception wraps all errors that occur during interaction with the mcpd daemon,
     including network failures, authentication errors, server errors, and tool execution
@@ -62,8 +60,7 @@ class McpdError(Exception):
 
 
 class ConnectionError(McpdError):
-    """
-    Raised when unable to connect to the mcpd daemon.
+    """Raised when unable to connect to the mcpd daemon.
 
     This typically indicates that:
     - The mcpd daemon is not running
@@ -84,8 +81,7 @@ class ConnectionError(McpdError):
 
 
 class AuthenticationError(McpdError):
-    """
-    Raised when authentication with the mcpd daemon fails.
+    """Raised when authentication with the mcpd daemon fails.
 
     This indicates that:
     - The API key is invalid or expired
@@ -107,8 +103,7 @@ class AuthenticationError(McpdError):
 
 
 class ServerNotFoundError(McpdError):
-    """
-    Raised when a specified MCP server doesn't exist.
+    """Raised when a specified MCP server doesn't exist.
 
     This error occurs when trying to access a server that:
     - Is not configured in the mcpd daemon
@@ -127,13 +122,18 @@ class ServerNotFoundError(McpdError):
     """
 
     def __init__(self, message: str, server_name: str = None):
+        """Initialize ServerNotFoundError.
+
+        Args:
+            message: The error message.
+            server_name: The name of the server that was not found.
+        """
         super().__init__(message)
         self.server_name = server_name
 
 
 class ToolNotFoundError(McpdError):
-    """
-    Raised when a specified tool doesn't exist on a server.
+    """Raised when a specified tool doesn't exist on a server.
 
     This error occurs when trying to call a tool that:
     - Doesn't exist on the specified server
@@ -154,14 +154,20 @@ class ToolNotFoundError(McpdError):
     """
 
     def __init__(self, message: str, server_name: str = None, tool_name: str = None):
+        """Initialize ToolNotFoundError.
+
+        Args:
+            message: The error message.
+            server_name: The name of the server where the tool was not found.
+            tool_name: The name of the tool that was not found.
+        """
         super().__init__(message)
         self.server_name = server_name
         self.tool_name = tool_name
 
 
 class ToolExecutionError(McpdError):
-    """
-    Raised when a tool execution fails on the server side.
+    """Raised when a tool execution fails on the server side.
 
     This indicates that the tool was found and called, but failed during execution:
     - Invalid parameters provided
@@ -185,6 +191,14 @@ class ToolExecutionError(McpdError):
     """
 
     def __init__(self, message: str, server_name: str = None, tool_name: str = None, details: dict = None):
+        """Initialize ToolExecutionError.
+
+        Args:
+            message: The error message.
+            server_name: The name of the server where the tool execution failed.
+            tool_name: The name of the tool that failed to execute.
+            details: Additional error details from the server.
+        """
         super().__init__(message)
         self.server_name = server_name
         self.tool_name = tool_name
@@ -192,8 +206,7 @@ class ToolExecutionError(McpdError):
 
 
 class ValidationError(McpdError):
-    """
-    Raised when input validation fails.
+    """Raised when input validation fails.
 
     This occurs when:
     - Required parameters are missing
@@ -214,13 +227,18 @@ class ValidationError(McpdError):
     """
 
     def __init__(self, message: str, validation_errors: list = None):
+        """Initialize ValidationError.
+
+        Args:
+            message: The error message.
+            validation_errors: List of specific validation error messages.
+        """
         super().__init__(message)
         self.validation_errors = validation_errors or []
 
 
 class TimeoutError(McpdError):
-    """
-    Raised when an operation times out.
+    """Raised when an operation times out.
 
     This can occur during:
     - Long-running tool executions
@@ -240,6 +258,13 @@ class TimeoutError(McpdError):
     """
 
     def __init__(self, message: str, operation: str = None, timeout: float = None):
+        """Initialize TimeoutError.
+
+        Args:
+            message: The error message.
+            operation: The operation that timed out.
+            timeout: The timeout value in seconds.
+        """
         super().__init__(message)
         self.operation = operation
         self.timeout = timeout

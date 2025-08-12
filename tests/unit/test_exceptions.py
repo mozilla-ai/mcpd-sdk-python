@@ -48,7 +48,7 @@ class TestMcpdError:
 
     def test_mcpd_error_catching_as_exception(self):
         """Test that McpdError can be caught as Exception."""
-        with pytest.raises(Exception):
+        with pytest.raises(McpdError):
             raise McpdError("Test error")
 
     def test_mcpd_error_chaining(self):

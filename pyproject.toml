@@ -46,10 +46,3 @@ namespaces = false
 "*" = ["py.typed"]
 
 [tool.setuptools_scm]
-
-[tool.ruff]
-fix = true
-line-length=120
-
-[tool.ruff.lint]
-select = ["I"]
