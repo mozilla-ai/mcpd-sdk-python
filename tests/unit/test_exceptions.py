@@ -1,6 +1,19 @@
-import pytest
+from unittest.mock import Mock, patch
 
-from mcpd.exceptions import McpdError
+import pytest
+import requests
+
+from mcpd import McpdClient
+from mcpd.exceptions import (
+    AuthenticationError,
+    ConnectionError,
+    McpdError,
+    ServerNotFoundError,
+    TimeoutError,
+    ToolExecutionError,
+    ToolNotFoundError,
+    ValidationError,
+)
 
 
 class TestMcpdError:
@@ -103,3 +116,273 @@ class TestMcpdError:
         assert "Complex error with data:" in str(error)
         assert "test" in str(error)
         assert "example" in str(error)
+
+
+class TestExceptionHierarchy:
+    """Test that all exceptions inherit from McpdError."""
+
+    def test_all_exceptions_inherit_from_mcpd_error(self):
+        """Verify exception hierarchy."""
+        assert issubclass(ConnectionError, McpdError)
+        assert issubclass(AuthenticationError, McpdError)
+        assert issubclass(ServerNotFoundError, McpdError)
+        assert issubclass(ToolNotFoundError, McpdError)
+        assert issubclass(ToolExecutionError, McpdError)
+        assert issubclass(TimeoutError, McpdError)
+        assert issubclass(ValidationError, McpdError)
+
+    def test_backward_compatibility(self):
+        """Test that catching McpdError still works for all subclasses."""
+        exceptions = [
+            ConnectionError("test"),
+            AuthenticationError("test"),
+            ServerNotFoundError("test", server_name="server1"),
+            ToolNotFoundError("test", server_name="server1", tool_name="tool1"),
+            ToolExecutionError("test"),
+            TimeoutError("test"),
+            ValidationError("test"),
+        ]
+
+        for exc in exceptions:
+            try:
+                raise exc
+            except McpdError:
+                pass  # Should catch all subclasses
+            except Exception:
+                pytest.fail(f"{exc.__class__.__name__} not caught by McpdError")
+
+
+class TestConnectionError:
+    """Test ConnectionError is raised appropriately."""
+
+    @patch("requests.Session")
+    def test_connection_error_on_servers(self, mock_session_class):
+        """Test ConnectionError when cannot connect to daemon."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Simulate connection error
+        mock_session.get.side_effect = requests.exceptions.ConnectionError("Connection refused")
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ConnectionError) as exc_info:
+            client.servers()
+
+        assert "Cannot connect to mcpd daemon" in str(exc_info.value)
+        assert "localhost:8090" in str(exc_info.value)
+
+    @patch("requests.Session")
+    def test_connection_error_on_tool_call(self, mock_session_class):
+        """Test ConnectionError when calling a tool."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("Connection refused")
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ConnectionError) as exc_info:
+            client._perform_call("test_server", "test_tool", {})
+
+        assert "Cannot connect to mcpd daemon" in str(exc_info.value)
+
+
+class TestAuthenticationError:
+    """Test AuthenticationError is raised appropriately."""
+
+    @patch("requests.Session")
+    def test_authentication_error_401(self, mock_session_class):
+        """Test AuthenticationError on 401 response."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Simulate 401 error
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.get.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090", api_key="bad-key")  # pragma: allowlist secret
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            client.servers()
+
+        assert "Authentication failed" in str(exc_info.value)
+
+
+class TestServerNotFoundError:
+    """Test ServerNotFoundError is raised appropriately."""
+
+    @patch("requests.Session")
+    def test_server_not_found_404(self, mock_session_class):
+        """Test ServerNotFoundError on 404 when getting tools."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Simulate 404 error
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.get.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ServerNotFoundError) as exc_info:
+            client._get_tool_definitions("nonexistent_server")
+
+        assert "Server 'nonexistent_server' not found" in str(exc_info.value)
+        assert exc_info.value.server_name == "nonexistent_server"
+
+    def test_server_not_found_attributes(self):
+        """Test ServerNotFoundError attributes."""
+        exc = ServerNotFoundError("Server not found", server_name="test_server")
+        assert exc.server_name == "test_server"
+
+
+class TestToolNotFoundError:
+    """Test ToolNotFoundError is raised appropriately."""
+
+    @patch("requests.Session")
+    def test_tool_not_found_in_dynamic_caller(self, mock_session_class):
+        """Test ToolNotFoundError when tool doesn't exist."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Mock successful server list with existing tool
+        mock_response = Mock()
+        mock_response.json.return_value = {"tools": [{"name": "existing_tool"}]}
+        mock_response.raise_for_status.return_value = None
+        mock_session.get.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ToolNotFoundError) as exc_info:
+            # This will trigger the has_tool check in dynamic_caller
+            client.call.test_server.nonexistent_tool()
+
+        assert "Tool 'nonexistent_tool' not found on server 'test_server'" in str(exc_info.value)
+        assert exc_info.value.server_name == "test_server"
+        assert exc_info.value.tool_name == "nonexistent_tool"
+
+    def test_tool_not_found_attributes(self):
+        """Test ToolNotFoundError attributes."""
+        exc = ToolNotFoundError("Tool not found", server_name="test_server", tool_name="test_tool")
+        assert exc.server_name == "test_server"
+        assert exc.tool_name == "test_tool"
+
+
+class TestToolExecutionError:
+    """Test ToolExecutionError is raised appropriately."""
+
+    @patch("requests.Session")
+    def test_tool_execution_error_500(self, mock_session_class):
+        """Test ToolExecutionError on 500 server error."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Simulate 500 error
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.post.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            client._perform_call("test_server", "test_tool", {"param": "value"})
+
+        assert "Server error when executing 'test_tool'" in str(exc_info.value)
+        assert exc_info.value.server_name == "test_server"
+        assert exc_info.value.tool_name == "test_tool"
+
+    @patch("requests.Session")
+    def test_tool_execution_error_400(self, mock_session_class):
+        """Test ToolExecutionError on 400 bad request."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Simulate 400 error
+        mock_response = Mock()
+        mock_response.status_code = 400
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.post.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            client._perform_call("test_server", "test_tool", {"bad": "param"})
+
+        assert "Error calling tool 'test_tool'" in str(exc_info.value)
+        assert exc_info.value.server_name == "test_server"
+        assert exc_info.value.tool_name == "test_tool"
+
+    def test_tool_execution_error_attributes(self):
+        """Test ToolExecutionError attributes."""
+        details = {"error_code": "INVALID_PARAMS"}
+        exc = ToolExecutionError("Execution failed", server_name="test_server", tool_name="test_tool", details=details)
+        assert exc.server_name == "test_server"
+        assert exc.tool_name == "test_tool"
+        assert exc.details == details
+
+
+class TestTimeoutError:
+    """Test TimeoutError is raised appropriately."""
+
+    @patch("requests.Session")
+    def test_timeout_error_on_servers(self, mock_session_class):
+        """Test TimeoutError when request times out."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Simulate timeout
+        mock_session.get.side_effect = requests.exceptions.Timeout("Request timed out")
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(TimeoutError) as exc_info:
+            client.servers()
+
+        assert "Request timed out after 5 seconds" in str(exc_info.value)
+        assert exc_info.value.operation == "list servers"
+        assert exc_info.value.timeout == 5
+
+    @patch("requests.Session")
+    def test_timeout_error_on_tool_call(self, mock_session_class):
+        """Test TimeoutError when tool execution times out."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_session.post.side_effect = requests.exceptions.Timeout("Request timed out")
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(TimeoutError) as exc_info:
+            client._perform_call("slow_server", "slow_tool", {})
+
+        assert "Tool execution timed out after 30 seconds" in str(exc_info.value)
+        assert exc_info.value.operation == "slow_server.slow_tool"
+        assert exc_info.value.timeout == 30
+
+    def test_timeout_error_attributes(self):
+        """Test TimeoutError attributes."""
+        exc = TimeoutError("Operation timed out", operation="fetch_data", timeout=30.0)
+        assert exc.operation == "fetch_data"
+        assert exc.timeout == 30.0
+
+
+class TestValidationError:
+    """Test ValidationError is raised appropriately."""
+
+    def test_validation_error_attributes(self):
+        """Test ValidationError stores validation errors."""
+        errors = ["Missing field 'name'", "Invalid type for 'age'"]
+        exc = ValidationError("Validation failed", validation_errors=errors)
+
+        assert exc.validation_errors == errors
+        assert "Validation failed" in str(exc)
+
+    def test_validation_error_empty_list(self):
+        """Test ValidationError with no specific errors."""
+        exc = ValidationError("Validation failed")
+        assert exc.validation_errors == []

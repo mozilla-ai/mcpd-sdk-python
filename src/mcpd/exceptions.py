@@ -1,4 +1,245 @@
+"""
+Exception hierarchy for the mcpd SDK.
+
+This module provides a structured exception hierarchy to help users handle
+different error scenarios appropriately.
+"""
+
+
 class McpdError(Exception):
-    """Base exception for MCP SDK errors."""
+    """
+    Base exception for all mcpd SDK errors.
+
+    This exception wraps all errors that occur during interaction with the mcpd daemon,
+    including network failures, authentication errors, server errors, and tool execution
+    failures. The original exception is preserved via exception chaining for debugging.
+
+    Common error scenarios:
+    - Network connectivity issues with the mcpd daemon
+    - Authentication failures (invalid or missing API key)
+    - Server not found or unavailable
+    - Tool not found on the specified server
+    - Tool execution errors (invalid parameters, server-side failures)
+    - Timeout errors during long-running operations
+
+    Attributes:
+        args: The error message and any additional arguments.
+        __cause__: The original exception that triggered this error (if any).
+
+    Example:
+        >>> from mcpd import McpdClient, McpdError
+        >>>
+        >>> client = McpdClient(api_endpoint="http://localhost:8090")
+        >>>
+        >>> try:
+        >>>     # Attempt to call a tool that might not exist
+        >>>     result = client.call.unknown_server.unknown_tool()
+        >>> except McpdError as e:
+        >>>     print(f"Operation failed: {e}")
+        >>>     # Access the original exception for debugging
+        >>>     if e.__cause__:
+        >>>         print(f"Underlying cause: {e.__cause__}")
+        >>>
+        >>> # Handle specific error scenarios
+        >>> try:
+        >>>     servers = client.servers()
+        >>> except McpdError as e:
+        >>>     if "authentication" in str(e).lower():
+        >>>         print("Authentication failed - check your API key")
+        >>>     elif "connection" in str(e).lower():
+        >>>         print("Cannot reach mcpd daemon - is it running?")
+        >>>     else:
+        >>>         print(f"Unexpected error: {e}")
+
+    Note:
+        When catching McpdError, you can access the original exception through
+        the `__cause__` attribute for more detailed error handling or logging.
+        All SDK methods that interact with the mcpd daemon will raise McpdError
+        or one of its subclasses on failure, providing a consistent error interface.
+    """
 
     pass
+
+
+class ConnectionError(McpdError):
+    """
+    Raised when unable to connect to the mcpd daemon.
+
+    This typically indicates that:
+    - The mcpd daemon is not running
+    - The endpoint URL is incorrect
+    - Network connectivity issues
+    - Firewall blocking the connection
+
+    Example:
+        >>> try:
+        >>>     client = McpdClient(api_endpoint="http://localhost:8090")
+        >>>     servers = client.servers()
+        >>> except ConnectionError as e:
+        >>>     print("Cannot reach mcpd daemon - is it running?")
+        >>>     print("Try running: mcpd start")
+    """
+
+    pass
+
+
+class AuthenticationError(McpdError):
+    """
+    Raised when authentication with the mcpd daemon fails.
+
+    This indicates that:
+    - The API key is invalid or expired
+    - The API key is missing but required
+    - The authentication method is not supported
+
+    Example:
+        >>> try:
+        >>>     client = McpdClient(
+        >>>         api_endpoint="http://localhost:8090",
+        >>>         api_key="invalid-key"  # pragma: allowlist secret
+        >>>     )
+        >>>     servers = client.servers()
+        >>> except AuthenticationError as e:
+        >>>     print("Authentication failed - check your API key")
+    """
+
+    pass
+
+
+class ServerNotFoundError(McpdError):
+    """
+    Raised when a specified MCP server doesn't exist.
+
+    This error occurs when trying to access a server that:
+    - Is not configured in the mcpd daemon
+    - Has been removed or renamed
+    - Is temporarily unavailable
+
+    Attributes:
+        server_name: The name of the server that wasn't found.
+
+    Example:
+        >>> try:
+        >>>     tools = client.tools("nonexistent_server")
+        >>> except ServerNotFoundError as e:
+        >>>     print(f"Server '{e.server_name}' not found")
+        >>>     print(f"Available servers: {client.servers()}")
+    """
+
+    def __init__(self, message: str, server_name: str = None):
+        super().__init__(message)
+        self.server_name = server_name
+
+
+class ToolNotFoundError(McpdError):
+    """
+    Raised when a specified tool doesn't exist on a server.
+
+    This error occurs when trying to call a tool that:
+    - Doesn't exist on the specified server
+    - Has been removed or renamed
+    - Is temporarily unavailable
+
+    Attributes:
+        server_name: The name of the server.
+        tool_name: The name of the tool that wasn't found.
+
+    Example:
+        >>> try:
+        >>>     result = client.call.time.nonexistent_tool()
+        >>> except ToolNotFoundError as e:
+        >>>     print(f"Tool '{e.tool_name}' not found on server '{e.server_name}'")
+        >>>     tools = client.tools(e.server_name)
+        >>>     print(f"Available tools: {[t['name'] for t in tools]}")
+    """
+
+    def __init__(self, message: str, server_name: str = None, tool_name: str = None):
+        super().__init__(message)
+        self.server_name = server_name
+        self.tool_name = tool_name
+
+
+class ToolExecutionError(McpdError):
+    """
+    Raised when a tool execution fails on the server side.
+
+    This indicates that the tool was found and called, but failed during execution:
+    - Invalid parameters provided
+    - Server-side error during tool execution
+    - Tool returned an error response
+    - Timeout during tool execution
+
+    Attributes:
+        server_name: The name of the server.
+        tool_name: The name of the tool that failed.
+        details: Additional error details from the server (if available).
+
+    Example:
+        >>> try:
+        >>>     # Call with invalid parameters
+        >>>     result = client.call.filesystem.read_file(path="/nonexistent/file")
+        >>> except ToolExecutionError as e:
+        >>>     print(f"Tool execution failed: {e}")
+        >>>     if e.details:
+        >>>         print(f"Server error details: {e.details}")
+    """
+
+    def __init__(self, message: str, server_name: str = None, tool_name: str = None, details: dict = None):
+        super().__init__(message)
+        self.server_name = server_name
+        self.tool_name = tool_name
+        self.details = details
+
+
+class ValidationError(McpdError):
+    """
+    Raised when input validation fails.
+
+    This occurs when:
+    - Required parameters are missing
+    - Parameter types don't match the schema
+    - Parameter values don't meet constraints
+
+    Attributes:
+        validation_errors: List of specific validation failures.
+
+    Example:
+        >>> try:
+        >>>     # Missing required parameter
+        >>>     result = client.call.database.query()  # 'sql' parameter required
+        >>> except ValidationError as e:
+        >>>     print(f"Validation failed: {e}")
+        >>>     for error in e.validation_errors:
+        >>>         print(f"  - {error}")
+    """
+
+    def __init__(self, message: str, validation_errors: list = None):
+        super().__init__(message)
+        self.validation_errors = validation_errors or []
+
+
+class TimeoutError(McpdError):
+    """
+    Raised when an operation times out.
+
+    This can occur during:
+    - Long-running tool executions
+    - Slow network connections
+    - Unresponsive mcpd daemon
+
+    Attributes:
+        operation: Description of the operation that timed out.
+        timeout: The timeout value in seconds.
+
+    Example:
+        >>> try:
+        >>>     # Long-running operation
+        >>>     result = client.call.analysis.process_large_dataset(data=huge_data)
+        >>> except TimeoutError as e:
+        >>>     print(f"Operation timed out after {e.timeout} seconds: {e.operation}")
+    """
+
+    def __init__(self, message: str, operation: str = None, timeout: float = None):
+        super().__init__(message)
+        self.operation = operation
+        self.timeout = timeout

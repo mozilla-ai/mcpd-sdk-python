@@ -43,9 +43,9 @@ class TestServerProxy:
     def test_getattr_tool_exists(self, server_proxy, mock_client):
         mock_client.has_tool.return_value = True
 
-        tool_callable = server_proxy.test_tool
+        tool_function = server_proxy.test_tool
 
-        assert callable(tool_callable)
+        assert callable(tool_function)
         mock_client.has_tool.assert_called_once_with("test_server", "test_tool")
 
     def test_getattr_tool_not_exists(self, server_proxy, mock_client):
@@ -54,31 +54,31 @@ class TestServerProxy:
         with pytest.raises(McpdError, match="Tool 'nonexistent_tool' not found on server 'test_server'"):
             server_proxy.nonexistent_tool
 
-    def test_tool_callable_execution(self, server_proxy, mock_client):
+    def test_tool_function_execution(self, server_proxy, mock_client):
         mock_client.has_tool.return_value = True
 
-        tool_callable = server_proxy.test_tool
-        result = tool_callable(param1="value1", param2="value2")
+        tool_function = server_proxy.test_tool
+        result = tool_function(param1="value1", param2="value2")
 
         assert result == {"result": "success"}
         mock_client._perform_call.assert_called_once_with(
             "test_server", "test_tool", {"param1": "value1", "param2": "value2"}
         )
 
-    def test_tool_callable_no_params(self, server_proxy, mock_client):
+    def test_tool_function_no_params(self, server_proxy, mock_client):
         mock_client.has_tool.return_value = True
 
-        tool_callable = server_proxy.test_tool
-        result = tool_callable()
+        tool_function = server_proxy.test_tool
+        result = tool_function()
 
         assert result == {"result": "success"}
         mock_client._perform_call.assert_called_once_with("test_server", "test_tool", {})
 
-    def test_tool_callable_with_kwargs(self, server_proxy, mock_client):
+    def test_tool_function_with_kwargs(self, server_proxy, mock_client):
         mock_client.has_tool.return_value = True
 
-        tool_callable = server_proxy.test_tool
-        result = tool_callable(
+        tool_function = server_proxy.test_tool
+        result = tool_function(
             string_param="test", int_param=42, bool_param=True, list_param=["a", "b", "c"], dict_param={"key": "value"}
         )
 
@@ -124,10 +124,10 @@ class TestServerProxy:
         mock_client.has_tool.return_value = True
         mock_client._perform_call.side_effect = Exception("API Error")
 
-        tool_callable = server_proxy.test_tool
+        tool_function = server_proxy.test_tool
 
         with pytest.raises(Exception, match="API Error"):
-            tool_callable(param="value")
+            tool_function(param="value")
 
 
 class TestIntegration:
