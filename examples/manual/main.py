@@ -1,3 +1,5 @@
+"""Example demonstrating manual tool execution with mcpd SDK."""
+
 import json
 import os
 
