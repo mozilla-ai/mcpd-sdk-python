@@ -42,6 +42,10 @@ uv sync --group all --active
 
 echo "Done! Root environment is ready in: $VENV_DIR"
 
+# Install pre-commit hooks
+echo "Installing pre-commit hooks"
+uv run pre-commit install
+
 # After detecting PATH lacked LOCAL_BIN…
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
   echo "Note: added $LOCAL_BIN to PATH for this session."

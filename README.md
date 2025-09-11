@@ -50,6 +50,12 @@ uv run pytest tests
 make test
 ```
 
+Lint files using:
+
+```bash
+make lint
+```
+
 ## Quick Start
 
 ```python
