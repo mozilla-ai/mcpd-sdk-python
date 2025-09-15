@@ -140,6 +140,12 @@ client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key"
 
 * `client.call.<server_name>.<tool_name>(**kwargs)` - The primary way to dynamically call any tool using keyword arguments.
 
+* `client.server_health() -> dict[str, dict]` - Returns a dictionary mapping each server name to the health information of that server.
+
+* `client.server_health(server_name: str) -> dict` - Returns the health information for only the specified server.
+
+* `client.is_server_healthy(server_name: str) -> bool` - Checks if the specified server is healthy and can handle requests.
+
 ## Error Handling
 
 All SDK-level errors, including HTTP and connection errors, will raise a `McpdError` exception.

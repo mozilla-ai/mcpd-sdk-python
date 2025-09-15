@@ -10,6 +10,7 @@ interface for working with multiple MCP servers through the mcpd daemon.
 """
 
 from collections.abc import Callable
+from enum import Enum
 from typing import Any
 
 import requests
@@ -20,10 +21,30 @@ from .exceptions import (
     ConnectionError,
     McpdError,
     ServerNotFoundError,
+    ServerUnhealthyError,
     TimeoutError,
     ToolExecutionError,
 )
 from .function_builder import FunctionBuilder
+
+
+class HealthStatus(Enum):
+    """Enumeration of possible MCP server health statuses."""
+
+    OK = "ok"
+    TIMEOUT = "timeout"
+    UNREACHABLE = "unreachable"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def is_transient(cls, status: str) -> bool:
+        """Check if the given health status is a transient error state."""
+        return status in (cls.TIMEOUT.value, cls.UNKNOWN.value)
+
+    @classmethod
+    def is_healthy(cls, status: str) -> bool:
+        """Check if the given status string represents a healthy state."""
+        return status == cls.OK.value
 
 
 class McpdClient:
@@ -430,3 +451,143 @@ class McpdClient:
             >>> tools_v2 = client.agent_tools()  # Regenerates from latest definitions
         """
         self._function_builder.clear_cache()
+
+    def _get_server_health(self, server_name: str | None = None) -> list[dict] | dict:
+        """Get health information for one or all MCP servers."""
+        try:
+            if server_name:
+                url = f"{self._endpoint}/api/v1/health/servers/{server_name}"
+            else:
+                url = f"{self._endpoint}/api/v1/health/servers"
+            response = self._session.get(url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            return data if server_name else data.get("servers", [])
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError(f"Cannot connect to mcpd daemon at {self._endpoint}: {e}") from e
+        except requests.exceptions.Timeout as e:
+            operation = f"get health of {server_name}" if server_name else "get health of all servers"
+            raise TimeoutError("Request timed out after 5 seconds", operation=operation, timeout=5) from e
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                msg = (
+                    f"Authentication failed when accessing server '{server_name}': {e}"
+                    if server_name
+                    else f"Authentication failed: {e}"
+                )
+                raise AuthenticationError(msg) from e
+            elif e.response.status_code == 404:
+                assert server_name is not None
+                raise ServerNotFoundError(f"Server '{server_name}' not found", server_name=server_name) from e
+            else:
+                msg = (
+                    f"Error retrieving health status for server '{server_name}': {e}"
+                    if server_name
+                    else f"Error retrieving health status for all servers: {e}"
+                )
+                raise McpdError(msg) from e
+        except requests.exceptions.RequestException as e:
+            msg = (
+                f"Error retrieving health status for server '{server_name}': {e}"
+                if server_name
+                else f"Error retrieving health status for all servers: {e}"
+            )
+            raise McpdError(msg) from e
+
+    def server_health(self, server_name: str | None = None) -> dict[str, dict] | dict:
+        """Retrieve health information from one or all MCP servers.
+
+        This method queries the mcpd daemon for health status of MCP servers.
+        Health information includes status, latency, and timestamps of last checks.
+
+        When server_name is provided, it queries only that server. Otherwise, it retrieves
+        health information from all servers in a single query.
+
+        Args:
+            server_name: Optional name of a specific server to query. If None,
+                         retrieves health information from all available servers.
+
+        Returns:
+            - If server_name is provided: The health information for that server.
+            - If server_name is None: A dictionary mapping server names to their health information.
+
+            Server health is a dictionary that contains:
+            - '$schema': A URL to the JSON schema
+            - 'name': The server identifier
+            - 'status': The current health status of the server ('ok', 'timeout', 'unreachable', 'unknown')
+            - 'latency': The latency of the server in milliseconds (optional)
+            - 'lastChecked': Time when ping was last attempted (optional)
+            - 'lastSuccessful': Time of the most recent successful ping (optional)
+
+        Raises:
+            ConnectionError: If unable to connect to the mcpd daemon.
+            TimeoutError: If requests to the daemon time out.
+            AuthenticationError: If API key authentication fails.
+            ServerNotFoundError: If the specified server doesn't exist (when server_name provided).
+            McpdError: For other daemon errors or API issues.
+
+        Examples:
+            >>> client = McpdClient(api_endpoint="http://localhost:8090")
+            >>>
+            >>> # Get health for a specific server
+            >>> health_info = client.server_health(server_name="time")
+            >>> print(health_info["status"])
+            ok
+            >>>
+            >>> # Get health for all servers
+            >>> all_health = client.server_health()
+            >>> for server, health in all_health.items():
+            ...     print(f"{server}: {health['status']}")
+            fetch: ok
+            time: ok
+        """
+        if server_name:
+            return self._get_server_health(server_name)
+
+        try:
+            all_health = self._get_server_health()
+            all_health_by_server = {}
+            for health in all_health:
+                all_health_by_server[health["name"]] = health
+            return all_health_by_server
+        except McpdError as e:
+            raise McpdError(f"Could not retrieve all health information: {e}") from e
+
+    def _raise_for_server_health(self, server_name: str):
+        """Raise an error if the specified MCP server is not healthy."""
+        health = self.server_health(server_name=server_name)
+        status = health["status"]
+        if not HealthStatus.is_healthy(status):
+            raise ServerUnhealthyError(
+                f"Server '{server_name}' is not healthy", server_name=server_name, health_status=status
+            )
+
+    def is_server_healthy(self, server_name: str) -> bool:
+        """Check if the specified MCP server is healthy.
+
+        This method queries the server's health status and determines whether the server is healthy
+        and therefore can handle requests or not. It's useful for validating an MCP server is ready
+        before attempting to call one of its tools.
+
+        Args:
+            server_name: The name of the MCP server to check.
+
+        Returns:
+            True if the server is healthy, False otherwise.
+            Returns False if the server doesn't exist, is unreachable or unhealthy, or if any
+            other error occurs during the check.
+
+        Example:
+            >>> client = McpdClient(api_endpoint="http://localhost:8090")
+            >>>
+            >>> # Check before calling
+            >>> if client.is_server_healthy("time"):
+            ...     result = client.call.time.get_current_time(timezone="UTC")
+            ... else:
+            ...     print("The server is not ready to accept requests yet.")
+        """
+        try:
+            self._raise_for_server_health(server_name)
+            return True
+        except McpdError:
+            return False

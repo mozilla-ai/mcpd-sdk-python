@@ -9,6 +9,7 @@ from mcpd.exceptions import (
     ConnectionError,
     McpdError,
     ServerNotFoundError,
+    ServerUnhealthyError,
     TimeoutError,
     ToolExecutionError,
     ToolNotFoundError,
@@ -126,6 +127,7 @@ class TestExceptionHierarchy:
         assert issubclass(ConnectionError, McpdError)
         assert issubclass(AuthenticationError, McpdError)
         assert issubclass(ServerNotFoundError, McpdError)
+        assert issubclass(ServerUnhealthyError, McpdError)
         assert issubclass(ToolNotFoundError, McpdError)
         assert issubclass(ToolExecutionError, McpdError)
         assert issubclass(TimeoutError, McpdError)
@@ -137,6 +139,7 @@ class TestExceptionHierarchy:
             ConnectionError("test"),
             AuthenticationError("test"),
             ServerNotFoundError("test", server_name="server1"),
+            ServerUnhealthyError("test", server_name="server1", health_status="timeout"),
             ToolNotFoundError("test", server_name="server1", tool_name="tool1"),
             ToolExecutionError("test"),
             TimeoutError("test"),
@@ -186,6 +189,22 @@ class TestConnectionError:
             client._perform_call("test_server", "test_tool", {})
 
         assert "Cannot connect to mcpd daemon" in str(exc_info.value)
+
+    @patch("requests.Session")
+    def test_connection_error_on_server_health(self, mock_session_class):
+        """Test ConnectionError when checking server health."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_session.get.side_effect = requests.exceptions.ConnectionError("Connection refused")
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ConnectionError) as exc_info:
+            client.server_health("test_server")
+
+        assert "Cannot connect to mcpd daemon" in str(exc_info.value)
+        assert "localhost:8090" in str(exc_info.value)
 
 
 class TestAuthenticationError:
@@ -238,6 +257,37 @@ class TestServerNotFoundError:
         """Test ServerNotFoundError attributes."""
         exc = ServerNotFoundError("Server not found", server_name="test_server")
         assert exc.server_name == "test_server"
+
+
+class TestServerUnhealthyError:
+    """Test ServerUnhealthyError is raised appropriately."""
+
+    @patch("requests.Session")
+    def test_server_unhealthy_error(self, mock_session_class):
+        """Test ServerUnhealthyError when server health is not 'ok'."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        # Mock server health response with unhealthy status
+        mock_response = Mock()
+        mock_response.json.return_value = {"name": "unhealthy_server", "status": "timeout"}
+        mock_response.raise_for_status.return_value = None
+        mock_session.get.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ServerUnhealthyError) as exc_info:
+            client._raise_for_server_health("unhealthy_server")
+
+        assert "Server 'unhealthy_server' is not healthy" in str(exc_info.value)
+        assert exc_info.value.server_name == "unhealthy_server"
+        assert exc_info.value.health_status == "timeout"
+
+    def test_server_unhealthy_attributes(self):
+        """Test ServerUnhealthyError attributes."""
+        exc = ServerUnhealthyError("Server unhealthy", server_name="test_server", health_status="timeout")
+        assert exc.server_name == "test_server"
+        assert exc.health_status == "timeout"
 
 
 class TestToolNotFoundError:
@@ -363,6 +413,23 @@ class TestTimeoutError:
         assert "Tool execution timed out after 30 seconds" in str(exc_info.value)
         assert exc_info.value.operation == "slow_server.slow_tool"
         assert exc_info.value.timeout == 30
+
+    @patch("requests.Session")
+    def test_timeout_error_on_server_health(self, mock_session_class):
+        """Test TimeoutError when server health times out."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_session.get.side_effect = requests.exceptions.Timeout("Request timed out")
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(TimeoutError) as exc_info:
+            client.server_health("slow_server")
+
+        assert "Request timed out after 5 seconds" in str(exc_info.value)
+        assert exc_info.value.operation == "get health of slow_server"
+        assert exc_info.value.timeout == 5
 
     def test_timeout_error_attributes(self):
         """Test TimeoutError attributes."""

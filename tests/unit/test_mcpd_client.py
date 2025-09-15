@@ -4,7 +4,18 @@ import pytest
 from requests import Session
 from requests.exceptions import RequestException
 
-from mcpd import McpdClient, McpdError
+from mcpd import HealthStatus, McpdClient, McpdError
+
+
+class TestHealthStatus:
+    def test_enum_values(self):
+        assert HealthStatus.OK.value == "ok"
+        assert HealthStatus.TIMEOUT.value == "timeout"
+        assert HealthStatus.UNREACHABLE.value == "unreachable"
+        assert HealthStatus.UNKNOWN.value == "unknown"
+
+    def test_is_healthy(self):
+        assert HealthStatus.is_healthy(HealthStatus.OK.value)
 
 
 class TestMcpdClient:
@@ -151,3 +162,65 @@ class TestMcpdClient:
         with patch.object(client._function_builder, "clear_cache") as mock_clear:
             client.clear_agent_tools_cache()
             mock_clear.assert_called_once()
+
+    @patch.object(Session, "get")
+    def test_health_single_server(self, mock_get, client):
+        mock_response = Mock()
+        mock_response.json.return_value = {"name": "test_server", "status": "ok"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result = client.server_health("test_server")
+
+        assert result == {"name": "test_server", "status": "ok"}
+        mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+    @patch.object(Session, "get")
+    def test_health_all_servers(self, mock_get, client):
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "servers": [{"name": "server1", "status": "ok"}, {"name": "server2", "status": "unreachable"}]
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result = client.server_health()
+
+        assert result == {
+            "server1": {"name": "server1", "status": "ok"},
+            "server2": {"name": "server2", "status": "unreachable"},
+        }
+        mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers", timeout=5)
+
+    @patch.object(Session, "get")
+    def test_health_request_error(self, mock_get, client):
+        mock_get.side_effect = RequestException("Connection failed")
+
+        with pytest.raises(McpdError, match="Error retrieving health status for all servers"):
+            client.server_health()
+
+    @patch.object(McpdClient, "server_health")
+    def test_is_healthy_true(self, mock_health, client):
+        mock_health.return_value = {"name": "test_server", "status": "ok"}
+
+        result = client.is_server_healthy("test_server")
+
+        assert result is True
+        mock_health.assert_called_once_with(server_name="test_server")
+
+    @patch.object(McpdClient, "server_health")
+    def test_is_healthy_false(self, mock_health, client):
+        for status in ["timeout", "unknown", "unreachable"]:
+            mock_health.return_value = {"name": "test_server", "status": status}
+
+            result = client.is_server_healthy("test_server")
+
+            assert result is False
+
+    @patch.object(McpdClient, "server_health")
+    def test_is_healthy_error(self, mock_health, client):
+        mock_health.side_effect = McpdError("Health check failed")
+
+        result = client.is_server_healthy("test_server")
+
+        assert result is False
