@@ -1,10 +1,11 @@
+import math
 from unittest.mock import Mock, patch
 
 import pytest
 from requests import Session
 from requests.exceptions import RequestException
 
-from mcpd import HealthStatus, McpdClient, McpdError
+from mcpd import AuthenticationError, HealthStatus, McpdClient, McpdError, ServerNotFoundError, ServerUnhealthyError
 
 
 class TestHealthStatus:
@@ -224,3 +225,110 @@ class TestMcpdClient:
         result = client.is_server_healthy("test_server")
 
         assert result is False
+
+    def test_cacheable_exceptions(self):
+        expected = {ServerNotFoundError, ServerUnhealthyError, AuthenticationError}
+        assert expected == set(McpdClient._CACHEABLE_EXCEPTIONS)
+
+    @patch.object(Session, "get")
+    def test_server_health_cache(self, mock_get):
+        client = McpdClient(api_endpoint="http://localhost:8090", server_health_cache_ttl=math.inf)
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"name": "test_server", "status": "ok"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        # First call should invoke the actual method
+        result1 = client.server_health("test_server")
+        assert result1 == {"name": "test_server", "status": "ok"}
+        mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+        # Second call should use the cached result
+        result2 = client.server_health("test_server")
+        assert result2 == {"name": "test_server", "status": "ok"}
+        mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+    def test_server_health_with_cacheable_exceptions(self):
+        exceptions = [
+            ServerNotFoundError("Server not found", "test_server"),
+            ServerUnhealthyError("server is unhealthy", "test_server", "unreachable"),
+            AuthenticationError(),
+        ]
+
+        for exc in exceptions:
+            client = McpdClient(api_endpoint="http://localhost:8090", server_health_cache_ttl=math.inf)
+            with patch("requests.Session.get") as server_health_mock:
+                # First call raises a cacheable exception
+                server_health_mock.side_effect = exc
+                with pytest.raises(type(exc)) as e:
+                    client.server_health("test_server")
+                    assert e in client._CACHEABLE_EXCEPTIONS
+                server_health_mock.assert_called_once_with(
+                    "http://localhost:8090/api/v1/health/servers/test_server", timeout=5
+                )
+
+                # Second call should use the cached exception
+                with pytest.raises(type(exc)) as e:
+                    client.server_health("test_server")
+                    assert e in client._CACHEABLE_EXCEPTIONS
+                server_health_mock.assert_called_once_with(
+                    "http://localhost:8090/api/v1/health/servers/test_server", timeout=5
+                )
+
+    @patch.object(Session, "get")
+    def test_server_health_cache_with_noncacheable_exception(self, mock_get):
+        # Ensure no caching occurs for non-cacheable exceptions
+        client = McpdClient(api_endpoint="http://localhost:8090", server_health_cache_ttl=math.inf)
+        mock_get.side_effect = RequestException("Connection failed")
+
+        with pytest.raises(McpdError) as e:
+            client.server_health("test_server")
+            assert e not in client._CACHEABLE_EXCEPTIONS
+
+        mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+        with pytest.raises(McpdError):
+            client.server_health("test_server")
+            assert e not in client._CACHEABLE_EXCEPTIONS
+
+        assert mock_get.call_count == 2
+
+    @patch.object(Session, "get")
+    def test_server_health_with_disabled_cache(self, mock_get):
+        client = McpdClient(api_endpoint="http://localhost:8090", server_health_cache_ttl=0)
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"name": "test_server", "status": "ok"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result1 = client.server_health("test_server")
+        assert result1 == {"name": "test_server", "status": "ok"}
+        mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+        # Subsequent call should not use cache and invoke the actual method again
+        result2 = client.server_health("test_server")
+        assert result2 == {"name": "test_server", "status": "ok"}
+        assert mock_get.call_count == 2
+
+    @patch.object(Session, "get")
+    def test_clear_server_health_cache(self, mock_get):
+        client = McpdClient(api_endpoint="http://localhost:8090", server_health_cache_ttl=math.inf)
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"name": "test_server", "status": "ok"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        result1 = client.server_health("test_server")
+        assert result1 == {"name": "test_server", "status": "ok"}
+        mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+        # Clear the cache
+        client.clear_server_health_cache("test_server")
+
+        # Subsequent call should not use cache and invoke the actual method again
+        result2 = client.server_health("test_server")
+        assert result2 == {"name": "test_server", "status": "ok"}
+        assert mock_get.call_count == 2

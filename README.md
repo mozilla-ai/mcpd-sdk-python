@@ -12,7 +12,7 @@ This SDK provides high-level and dynamic access to those tools, making it easy t
 - Retrieve tool definitions and schemas for one or all servers
 - Dynamically invoke any tool using a clean, attribute-based syntax
 - Generate self-contained, deepcopy-safe tool functions for frameworks like [any-agent](https://github.com/mozilla-ai/any-agent)
-- Minimal dependencies (`requests` only)
+- Minimal dependencies (`requests` and `cachetools` only)
 
 ## Installation in your project
 
@@ -121,7 +121,8 @@ from mcpd import McpdClient
 
 # Initialize the client with your mcpd API endpoint.
 # api_key is optional and sends an 'MCPD-API-KEY' header.
-client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key")
+# server_health_cache_ttl is optional and sets the time in seconds to cache a server health response.
+client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key", server_health_cache_ttl=10)
 ```
 
 ### Core Methods

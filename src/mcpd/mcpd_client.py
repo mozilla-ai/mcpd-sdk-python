@@ -9,11 +9,14 @@ The client handles authentication, error management, and provides a unified
 interface for working with multiple MCP servers through the mcpd daemon.
 """
 
+import math
 from collections.abc import Callable
 from enum import Enum
-from typing import Any
+from functools import wraps
+from typing import Any, ParamSpec, TypeVar
 
 import requests
+from cachetools import TTLCache, cached
 
 from .dynamic_caller import DynamicCaller
 from .exceptions import (
@@ -26,6 +29,9 @@ from .exceptions import (
     ToolExecutionError,
 )
 from .function_builder import FunctionBuilder
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class HealthStatus(Enum):
@@ -71,7 +77,13 @@ class McpdClient:
         >>> print(result)  # {'time': '2024-01-15T10:30:00Z'}
     """
 
-    def __init__(self, api_endpoint: str, api_key: str | None = None):
+    _CACHEABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
+        ServerNotFoundError,
+        ServerUnhealthyError,
+        AuthenticationError,
+    )
+
+    def __init__(self, api_endpoint: str, api_key: str | None = None, server_health_cache_ttl: float = 10):
         """Initialize a new McpdClient instance.
 
         Args:
@@ -79,6 +91,8 @@ class McpdClient:
                          Trailing slashes will be automatically removed.
             api_key: Optional API key for Bearer token authentication. If provided,
                     will be included in all requests as "Authorization: Bearer {api_key}".
+            server_health_cache_ttl: Time to live in seconds for the cache of
+                                    the server health API calls. A value of 0 means no caching.
 
         Raises:
             ValueError: If api_endpoint is empty or invalid.
@@ -108,6 +122,9 @@ class McpdClient:
 
         # Dynamic call interface
         self.call = DynamicCaller(self)
+
+        # A TTL cache for server health calls without size limits
+        self._server_health_cache = TTLCache(maxsize=math.inf, ttl=server_health_cache_ttl)
 
     def _perform_call(self, server_name: str, tool_name: str, params: dict[str, Any]) -> Any:
         """Perform the actual API call to execute a tool on an MCP server.
@@ -452,6 +469,99 @@ class McpdClient:
         """
         self._function_builder.clear_cache()
 
+    def _exception_to_result(
+        self, func: Callable[P, R], cacheable_exceptions: tuple[type[Exception], ...]
+    ) -> Callable[P, R | Exception]:
+        """Decorator that executes the wrapped function and captures any exception as the return value.
+
+        If the wrapped function raises an exception from the given cacheable_exceptions,
+        the exception object is returned instead of propagating it. This is used to extend
+        the functionality of the caches provided by the cachetools library which, by default
+        do not cache results when exceptions are raised.
+
+        Args:
+            func: The function to wrap.
+            cacheable_exceptions: A tuple of exception types that should be captured and returned.
+
+        Returns:
+            The result of the function, or the exception object if an exception was raised.
+        """
+
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except cacheable_exceptions as e:
+                return e
+
+        return wrapped
+
+    def _result_to_exception(self, func: Callable[P, R | Exception]) -> Callable[P, R]:
+        """Decorator that checks if the wrapped function returns an Exception and raises it.
+
+        If the wrapped function returns an Exception object, this decorator raises it.
+        Otherwise, it returns the result as normal. Useful for converting error-as-result
+        patterns back into standard exception propagation.
+
+        Args:
+            func: The function to wrap.
+
+        Returns:
+            The result of the function, or raises the exception if the result is an Exception.
+        """
+
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            result = func(*args, **kwargs)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        return wrapped
+
+    def _cache_with_selective_exceptions(self) -> Callable[[Callable[P, R]], Callable[P, R]]:
+        """Decorator which caches results of the wrapped function, including certain cacheable exceptions.
+
+        The caching primitives provided by the cachetools library do not cache results when exceptions
+        are raised by the wrapped function. This decorator allows caching certain exceptions by combining
+        three behaviors:
+
+        1. Captures certain exceptions as results (using _exception_to_result). See _CACHEABLE_EXCEPTIONS.
+        2. Caches the results (including captured exceptions) using cachetools.cached.
+        3. Propagates any captured exceptions as raised exceptions (using _result_to_exception).
+
+        Returns:
+            A decorator that applies all three behaviors in order.
+        """
+
+        def decorator(function):
+            decorated = self._exception_to_result(function, cacheable_exceptions=self._CACHEABLE_EXCEPTIONS)
+            decorated = cached(cache=self._server_health_cache)(decorated)
+            decorated = self._result_to_exception(decorated)
+            return decorated
+
+        return decorator
+
+    @staticmethod
+    def _cache_with_selective_exceptions_and_self(func: Callable[P, R]) -> Callable[P, R]:
+        """Decorator to apply _cache_with_selective_exceptions to methods.
+
+        This is a helper to apply the caching decorator to instance methods that
+        need access to self.
+
+        Args:
+            func: The instance method to wrap.
+
+        Returns:
+            A decorator that can be applied to instance methods.
+        """
+
+        def wrapper(self, *args, **kwargs):
+            return self._cache_with_selective_exceptions()(func)(self, *args, **kwargs)
+
+        return wrapper
+
+    @_cache_with_selective_exceptions_and_self
     def _get_server_health(self, server_name: str | None = None) -> list[dict] | dict:
         """Get health information for one or all MCP servers."""
         try:
@@ -502,6 +612,9 @@ class McpdClient:
 
         When server_name is provided, it queries only that server. Otherwise, it retrieves
         health information from all servers in a single query.
+
+        The returned health information is cached for performance using a TTL cache. Use
+        clear_server_health_cache() to force a fresh check.
 
         Args:
             server_name: Optional name of a specific server to query. If None,
@@ -591,3 +704,43 @@ class McpdClient:
             return True
         except McpdError:
             return False
+
+    def clear_server_health_cache(self, server_name: str | None = None) -> None:
+        """Clear the cached health information for one or all MCP servers.
+
+        This method clears the internal cache that stores server health information.
+        Call this when server statuses may have changed to ensure server_health() fetches
+        fresh data from the mcpd daemon.
+
+        Call this method when:
+        - You want to force a fresh health check
+        - You want to clear stale or potentially incorrect health data
+
+        Note: Cache entries are automatically invalidated based on the TTL set
+        during initialization (see `server_health_cache_ttl`).
+
+        This only affects the internal server health cache used by server_health(). It does not
+        affect the mcpd daemon or MCP servers themselves.
+
+        Args:
+            server_name: The name of the MCP server to clear the cache for. If None, clears all caches.
+
+        Returns:
+            None
+
+        Example:
+            >>> client = McpdClient(api_endpoint="http://localhost:8090")
+            >>>
+            >>> # Initial server health check
+            >>> health_v1 = client.server_health("time")
+            >>>
+            >>> # ... Force a fresh health check ...
+            >>>
+            >>> # Clear cache to get updated health info
+            >>> client.clear_server_health_cache("time")
+            >>> health_v2 = client.server_health("time") # Fetches fresh health data
+        """
+        if server_name is None:
+            self._server_health_cache.clear()
+        else:
+            self._server_health_cache.pop((self, server_name), None)
