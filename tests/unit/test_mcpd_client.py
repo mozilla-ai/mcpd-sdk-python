@@ -230,6 +230,9 @@ class TestMcpdClient:
         expected = {ServerNotFoundError, ServerUnhealthyError, AuthenticationError}
         assert expected == set(McpdClient._CACHEABLE_EXCEPTIONS)
 
+    def test_server_health_cache_maxsize(self):
+        assert McpdClient._SERVER_HEALTH_CACHE_MAXSIZE == 100
+
     @patch.object(Session, "get")
     def test_server_health_cache(self, mock_get):
         client = McpdClient(api_endpoint="http://localhost:8090", server_health_cache_ttl=math.inf)
@@ -291,7 +294,7 @@ class TestMcpdClient:
 
         with pytest.raises(McpdError) as e:
             client.server_health("test_server")
-        
+
         assert not isinstance(e.value, client._CACHEABLE_EXCEPTIONS)
 
         mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)

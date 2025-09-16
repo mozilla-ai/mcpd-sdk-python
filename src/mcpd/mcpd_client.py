@@ -9,7 +9,6 @@ The client handles authentication, error management, and provides a unified
 interface for working with multiple MCP servers through the mcpd daemon.
 """
 
-import math
 from collections.abc import Callable
 from enum import Enum
 from functools import wraps
@@ -82,6 +81,13 @@ class McpdClient:
         ServerUnhealthyError,
         AuthenticationError,
     )
+    """Exception types that should be cached when raised during server health checks.
+    These exceptions represent persistent server states that benefit from caching
+    to avoid repeated failed health check requests within the TTL period."""
+
+    _SERVER_HEALTH_CACHE_MAXSIZE: int = 100
+    """Maximum number of server health entries to cache.
+    Prevents unbounded memory growth while allowing legitimate large-scale monitoring."""
 
     def __init__(self, api_endpoint: str, api_key: str | None = None, server_health_cache_ttl: float = 10):
         """Initialize a new McpdClient instance.
@@ -123,8 +129,8 @@ class McpdClient:
         # Dynamic call interface
         self.call = DynamicCaller(self)
 
-        # A TTL cache for server health calls without size limits
-        self._server_health_cache = TTLCache(maxsize=math.inf, ttl=server_health_cache_ttl)
+        # A TTL cache for server health calls. Uses LRU eviction for least recently checked servers.
+        self._server_health_cache = TTLCache(maxsize=self._SERVER_HEALTH_CACHE_MAXSIZE, ttl=server_health_cache_ttl)
 
     def _perform_call(self, server_name: str, tool_name: str, params: dict[str, Any]) -> Any:
         """Perform the actual API call to execute a tool on an MCP server.
