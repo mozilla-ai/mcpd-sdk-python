@@ -9,6 +9,7 @@ The client handles authentication, error management, and provides a unified
 interface for working with multiple MCP servers through the mcpd daemon.
 """
 
+import threading
 from collections.abc import Callable
 from enum import Enum
 from functools import wraps
@@ -57,6 +58,11 @@ class McpdClient:
 
     The McpdClient provides a high-level interface to discover, inspect, and invoke tools
     exposed by MCP servers running behind an mcpd daemon proxy/gateway.
+
+    Thread Safety:
+        This client is thread-safe. Multiple threads can safely share a single instance.
+        The internal health check cache is protected by locks with negligible performance
+        impact since network I/O dominates execution time.
 
     Attributes:
         call: Dynamic interface for invoking tools using dot notation.
@@ -129,6 +135,8 @@ class McpdClient:
         # Dynamic call interface
         self.call = DynamicCaller(self)
 
+        # Thread-safe caching for server health checks
+        self._cache_lock = threading.RLock()
         # A TTL cache for server health calls. Uses LRU eviction for least recently checked servers.
         self._server_health_cache = TTLCache(maxsize=self._SERVER_HEALTH_CACHE_MAXSIZE, ttl=server_health_cache_ttl)
 
@@ -559,7 +567,7 @@ class McpdClient:
 
         def decorator(function):
             decorated = self._exception_to_result(function, cacheable_exceptions=self._CACHEABLE_EXCEPTIONS)
-            decorated = cached(cache=self._server_health_cache)(decorated)
+            decorated = cached(cache=self._server_health_cache, lock=self._cache_lock)(decorated)
             decorated = self._result_to_exception(decorated)
             return decorated
 
@@ -804,7 +812,8 @@ class McpdClient:
             >>> client.clear_server_health_cache("time")
             >>> health_v2 = client.server_health("time") # Fetches fresh health data
         """
-        if server_name is None:
-            self._server_health_cache.clear()
-        else:
-            self._server_health_cache.pop((self, server_name), None)
+        with self._cache_lock:
+            if server_name is None:
+                self._server_health_cache.clear()
+            else:
+                self._server_health_cache.pop((self, server_name), None)
