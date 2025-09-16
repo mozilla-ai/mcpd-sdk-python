@@ -249,32 +249,39 @@ class TestMcpdClient:
         assert result2 == {"name": "test_server", "status": "ok"}
         mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
 
-    def test_server_health_with_cacheable_exceptions(self):
+    @patch.object(Session, "get")
+    def test_server_health_with_cacheable_exceptions(self, mock_get):
         exceptions = [
             ServerNotFoundError("Server not found", "test_server"),
             ServerUnhealthyError("server is unhealthy", "test_server", "unreachable"),
             AuthenticationError(),
         ]
 
+        # Verify our test covers all cacheable exceptions
+        client = McpdClient(api_endpoint="http://localhost:8090")
+        assert len(exceptions) == len(client._CACHEABLE_EXCEPTIONS)
+
         for exc in exceptions:
             client = McpdClient(api_endpoint="http://localhost:8090", server_health_cache_ttl=math.inf)
-            with patch("requests.Session.get") as server_health_mock:
-                # First call raises a cacheable exception
-                server_health_mock.side_effect = exc
-                with pytest.raises(type(exc)) as e:
-                    client.server_health("test_server")
-                    assert e in client._CACHEABLE_EXCEPTIONS
-                server_health_mock.assert_called_once_with(
-                    "http://localhost:8090/api/v1/health/servers/test_server", timeout=5
-                )
+            # First call raises a cacheable exception
+            mock_get.side_effect = exc
+            with pytest.raises(type(exc)) as e:
+                client.server_health("test_server")
 
-                # Second call should use the cached exception
-                with pytest.raises(type(exc)) as e:
-                    client.server_health("test_server")
-                    assert e in client._CACHEABLE_EXCEPTIONS
-                server_health_mock.assert_called_once_with(
-                    "http://localhost:8090/api/v1/health/servers/test_server", timeout=5
-                )
+            assert type(e.value) in client._CACHEABLE_EXCEPTIONS
+            mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+            # Second call should use the cached exception
+            with pytest.raises(type(exc)) as e2:
+                client.server_health("test_server")
+
+            # Verify this is still a cacheable exception type
+            assert type(e2.value) in client._CACHEABLE_EXCEPTIONS
+            # Verify the mock was still only called once (cache was used)
+            mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
+
+            # Reset the mock for next iteration
+            mock_get.reset_mock()
 
     @patch.object(Session, "get")
     def test_server_health_cache_with_noncacheable_exception(self, mock_get):
@@ -284,14 +291,16 @@ class TestMcpdClient:
 
         with pytest.raises(McpdError) as e:
             client.server_health("test_server")
-            assert e not in client._CACHEABLE_EXCEPTIONS
+        
+        assert not isinstance(e.value, client._CACHEABLE_EXCEPTIONS)
 
         mock_get.assert_called_once_with("http://localhost:8090/api/v1/health/servers/test_server", timeout=5)
 
-        with pytest.raises(McpdError):
+        with pytest.raises(McpdError) as e2:
             client.server_health("test_server")
-            assert e not in client._CACHEABLE_EXCEPTIONS
+        assert not isinstance(e2.value, client._CACHEABLE_EXCEPTIONS)
 
+        # Should be called twice since exception wasn't cached
         assert mock_get.call_count == 2
 
     @patch.object(Session, "get")
