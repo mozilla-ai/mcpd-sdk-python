@@ -229,11 +229,15 @@ class TestMcpdClient:
 
     @patch.object(McpdClient, "server_health")
     def test_is_healthy_error(self, mock_health, client):
-        mock_health.side_effect = McpdError("Health check failed")
-
+        # Test that ServerNotFoundError returns False
+        mock_health.side_effect = ServerNotFoundError("Server not found", server_name="test_server")
         result = client.is_server_healthy("test_server")
-
         assert result is False
+
+        # Test that generic McpdError propagates
+        mock_health.side_effect = McpdError("Health check failed")
+        with pytest.raises(McpdError, match="Health check failed"):
+            client.is_server_healthy("test_server")
 
     def test_cacheable_exceptions(self):
         expected = {ServerNotFoundError, ServerUnhealthyError, AuthenticationError}

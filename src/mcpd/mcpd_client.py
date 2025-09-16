@@ -745,9 +745,13 @@ class McpdClient:
             server_name: The name of the MCP server to check.
 
         Returns:
-            True if the server is healthy, False otherwise.
-            Returns False if the server doesn't exist, is unreachable or unhealthy, or if any
-            other error occurs during the check.
+            True if the server is healthy, False if the server is unhealthy or doesn't exist.
+
+        Raises:
+            ConnectionError: If unable to connect to the mcpd daemon.
+            TimeoutError: If the health check request times out.
+            AuthenticationError: If API key authentication fails.
+            McpdError: For other daemon errors that prevent checking health status.
 
         Example:
             >>> client = McpdClient(api_endpoint="http://localhost:8090")
@@ -761,7 +765,8 @@ class McpdClient:
         try:
             self._raise_for_server_health(server_name)
             return True
-        except McpdError:
+        except (ServerUnhealthyError, ServerNotFoundError):
+            # These specific exceptions represent servers that are unhealthy one way or another
             return False
 
     def clear_server_health_cache(self, server_name: str | None = None) -> None:
