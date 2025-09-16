@@ -319,7 +319,24 @@ class McpdClient:
             raise McpdError(f"Could not retrieve all tool definitions: {e}") from e
 
     def _get_tool_definitions(self, server_name: str) -> list[dict[str, Any]]:
-        """Get tool definitions for a specific server."""
+        """Get tool definitions for a specific server.
+
+        Internal method that handles HTTP requests to retrieve tool schemas.
+        Called by tools() and other public methods.
+
+        Args:
+            server_name: Name of the server to get tools from.
+
+        Returns:
+            List of tool definition dictionaries containing schemas and metadata.
+
+        Raises:
+            ConnectionError: If unable to connect to mcpd daemon.
+            TimeoutError: If request times out after 5 seconds.
+            AuthenticationError: If API key authentication fails (HTTP 401).
+            ServerNotFoundError: If server doesn't exist (HTTP 404).
+            McpdError: For other daemon errors or API issues.
+        """
         try:
             url = f"{self._endpoint}/api/v1/servers/{server_name}/tools"
             response = self._session.get(url, timeout=5)
@@ -569,7 +586,20 @@ class McpdClient:
 
     @_cache_with_selective_exceptions_and_self
     def _get_server_health(self, server_name: str | None = None) -> list[dict] | dict:
-        """Get health information for one or all MCP servers."""
+        """Get health information for one or all MCP servers.
+
+        Internal method that handles HTTP requests to mcpd daemon health endpoints.
+        Called by server_health() and other public methods.
+
+        Args:
+            server_name: Optional name of specific server. If None, gets all servers.
+
+        Returns:
+            Health data for the server(s). See server_health() for format details.
+
+        Raises:
+            See server_health() for all possible exceptions.
+        """
         try:
             if server_name:
                 url = f"{self._endpoint}/api/v1/health/servers/{server_name}"
@@ -680,7 +710,23 @@ class McpdClient:
             raise McpdError(f"Could not retrieve all health information: {e}") from e
 
     def _raise_for_server_health(self, server_name: str):
-        """Raise an error if the specified MCP server is not healthy."""
+        """Raise an error if the specified MCP server is not healthy.
+
+        This internal method checks server health and raises ServerUnhealthyError
+        if the server status is anything other than 'ok'. Used by methods that
+        require a healthy server before proceeding.
+
+        Args:
+            server_name: Name of the server to check.
+
+        Raises:
+            ServerUnhealthyError: If the server status is not 'ok'.
+            ConnectionError: If unable to connect to the mcpd daemon.
+            TimeoutError: If health check request times out.
+            AuthenticationError: If API key authentication fails.
+            ServerNotFoundError: If the specified server doesn't exist.
+            McpdError: For other daemon errors during health check.
+        """
         health = self.server_health(server_name=server_name)
         status = health["status"]
         if not HealthStatus.is_healthy(status):
