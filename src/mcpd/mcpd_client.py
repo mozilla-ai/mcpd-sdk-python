@@ -653,6 +653,13 @@ class McpdClient:
             >>> print(health_info["status"])
             ok
             >>>
+            >>> # Check if a server failure is temporary (useful for retry logic)
+            >>> health_info = client.server_health(server_name="problematic_server")
+            >>> if HealthStatus.is_transient(health_info["status"]):
+            ...     print("Temporary issue, will retry")
+            ... else:
+            ...     print("Persistent problem, requires intervention")
+            >>>
             >>> # Get health for all servers
             >>> all_health = client.server_health()
             >>> for server, health in all_health.items():

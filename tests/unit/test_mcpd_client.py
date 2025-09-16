@@ -17,6 +17,15 @@ class TestHealthStatus:
 
     def test_is_healthy(self):
         assert HealthStatus.is_healthy(HealthStatus.OK.value)
+        assert not HealthStatus.is_healthy(HealthStatus.TIMEOUT.value)
+        assert not HealthStatus.is_healthy(HealthStatus.UNREACHABLE.value)
+        assert not HealthStatus.is_healthy(HealthStatus.UNKNOWN.value)
+
+    def test_is_transient(self):
+        assert HealthStatus.is_transient(HealthStatus.TIMEOUT.value)
+        assert HealthStatus.is_transient(HealthStatus.UNKNOWN.value)
+        assert not HealthStatus.is_transient(HealthStatus.OK.value)
+        assert not HealthStatus.is_transient(HealthStatus.UNREACHABLE.value)
 
 
 class TestMcpdClient:
