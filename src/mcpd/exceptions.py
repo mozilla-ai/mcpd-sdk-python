@@ -132,6 +132,41 @@ class ServerNotFoundError(McpdError):
         self.server_name = server_name
 
 
+class ServerUnhealthyError(McpdError):
+    """Raised when a specified MCP server is not healthy.
+
+    This indicates that the server exists but is currently unhealthy:
+    - The server is down or unreachable
+    - Timeout occurred while checking health
+    - No health data is available for the server
+
+    Attributes:
+        server_name: The name of the server that is unhealthy.
+        health_status: Details about the server's health status (if available).
+                      Can be one of timeout, unreachable, unknown.
+
+    Example:
+        >>> try:
+        >>>     tools = client.tools("unhealthy_server")
+        >>> except ServerUnhealthyError as e:
+        >>>     print(f"Server '{e.server_name}' is unhealthy")
+        >>>     if e.health_status:
+        >>>         print(f"Health details: {e.health_status}")
+    """
+
+    def __init__(self, message: str, server_name: str, health_status: str):
+        """Initialize ServerUnhealthyError.
+
+        Args:
+            message: The error message.
+            server_name: The name of the server that is unhealthy.
+            health_status: Details about the server's health status.
+        """
+        super().__init__(message)
+        self.server_name = server_name
+        self.health_status = health_status
+
+
 class ToolNotFoundError(McpdError):
     """Raised when a specified tool doesn't exist on a server.
 

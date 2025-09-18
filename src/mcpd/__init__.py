@@ -17,19 +17,22 @@ from .exceptions import (
     ConnectionError,
     McpdError,
     ServerNotFoundError,
+    ServerUnhealthyError,
     TimeoutError,
     ToolExecutionError,
     ToolNotFoundError,
     ValidationError,
 )
-from .mcpd_client import McpdClient
+from .mcpd_client import HealthStatus, McpdClient
 
 __all__ = [
     "McpdClient",
+    "HealthStatus",
     "McpdError",
     "AuthenticationError",
     "ConnectionError",
     "ServerNotFoundError",
+    "ServerUnhealthyError",
     "TimeoutError",
     "ToolExecutionError",
     "ToolNotFoundError",

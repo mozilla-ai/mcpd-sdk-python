@@ -9,10 +9,14 @@ The client handles authentication, error management, and provides a unified
 interface for working with multiple MCP servers through the mcpd daemon.
 """
 
+import threading
 from collections.abc import Callable
-from typing import Any
+from enum import Enum
+from functools import wraps
+from typing import Any, ParamSpec, TypeVar
 
 import requests
+from cachetools import TTLCache, cached
 
 from .dynamic_caller import DynamicCaller
 from .exceptions import (
@@ -20,10 +24,33 @@ from .exceptions import (
     ConnectionError,
     McpdError,
     ServerNotFoundError,
+    ServerUnhealthyError,
     TimeoutError,
     ToolExecutionError,
 )
 from .function_builder import FunctionBuilder
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+class HealthStatus(Enum):
+    """Enumeration of possible MCP server health statuses."""
+
+    OK = "ok"
+    TIMEOUT = "timeout"
+    UNREACHABLE = "unreachable"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def is_transient(cls, status: str) -> bool:
+        """Check if the given health status is a transient error state."""
+        return status in (cls.TIMEOUT.value, cls.UNKNOWN.value)
+
+    @classmethod
+    def is_healthy(cls, status: str) -> bool:
+        """Check if the given status string represents a healthy state."""
+        return status == cls.OK.value
 
 
 class McpdClient:
@@ -31,6 +58,11 @@ class McpdClient:
 
     The McpdClient provides a high-level interface to discover, inspect, and invoke tools
     exposed by MCP servers running behind an mcpd daemon proxy/gateway.
+
+    Thread Safety:
+        This client is thread-safe. Multiple threads can safely share a single instance.
+        The internal health check cache is protected by locks with negligible performance
+        impact since network I/O dominates execution time.
 
     Attributes:
         call: Dynamic interface for invoking tools using dot notation.
@@ -50,7 +82,20 @@ class McpdClient:
         >>> print(result)  # {'time': '2024-01-15T10:30:00Z'}
     """
 
-    def __init__(self, api_endpoint: str, api_key: str | None = None):
+    _CACHEABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
+        ServerNotFoundError,
+        ServerUnhealthyError,
+        AuthenticationError,
+    )
+    """Exception types that should be cached when raised during server health checks.
+    These exceptions represent persistent server states that benefit from caching
+    to avoid repeated failed health check requests within the TTL period."""
+
+    _SERVER_HEALTH_CACHE_MAXSIZE: int = 100
+    """Maximum number of server health entries to cache.
+    Prevents unbounded memory growth while allowing legitimate large-scale monitoring."""
+
+    def __init__(self, api_endpoint: str, api_key: str | None = None, server_health_cache_ttl: float = 10):
         """Initialize a new McpdClient instance.
 
         Args:
@@ -58,6 +103,8 @@ class McpdClient:
                          Trailing slashes will be automatically removed.
             api_key: Optional API key for Bearer token authentication. If provided,
                     will be included in all requests as "Authorization: Bearer {api_key}".
+            server_health_cache_ttl: Time to live in seconds for the cache of
+                                    the server health API calls. A value of 0 means no caching.
 
         Raises:
             ValueError: If api_endpoint is empty or invalid.
@@ -87,6 +134,11 @@ class McpdClient:
 
         # Dynamic call interface
         self.call = DynamicCaller(self)
+
+        # Thread-safe caching for server health checks
+        self._cache_lock = threading.RLock()
+        # A TTL cache for server health calls. Uses LRU eviction for least recently checked servers.
+        self._server_health_cache = TTLCache(maxsize=self._SERVER_HEALTH_CACHE_MAXSIZE, ttl=server_health_cache_ttl)
 
     def _perform_call(self, server_name: str, tool_name: str, params: dict[str, Any]) -> Any:
         """Perform the actual API call to execute a tool on an MCP server.
@@ -275,7 +327,24 @@ class McpdClient:
             raise McpdError(f"Could not retrieve all tool definitions: {e}") from e
 
     def _get_tool_definitions(self, server_name: str) -> list[dict[str, Any]]:
-        """Get tool definitions for a specific server."""
+        """Get tool definitions for a specific server.
+
+        Internal method that handles HTTP requests to retrieve tool schemas.
+        Called by tools() and other public methods.
+
+        Args:
+            server_name: Name of the server to get tools from.
+
+        Returns:
+            List of tool definition dictionaries containing schemas and metadata.
+
+        Raises:
+            ConnectionError: If unable to connect to mcpd daemon.
+            TimeoutError: If request times out after 5 seconds.
+            AuthenticationError: If API key authentication fails (HTTP 401).
+            ServerNotFoundError: If server doesn't exist (HTTP 404).
+            McpdError: For other daemon errors or API issues.
+        """
         try:
             url = f"{self._endpoint}/api/v1/servers/{server_name}/tools"
             response = self._session.get(url, timeout=5)
@@ -430,3 +499,321 @@ class McpdClient:
             >>> tools_v2 = client.agent_tools()  # Regenerates from latest definitions
         """
         self._function_builder.clear_cache()
+
+    def _exception_to_result(
+        self, func: Callable[P, R], cacheable_exceptions: tuple[type[Exception], ...]
+    ) -> Callable[P, R | Exception]:
+        """Decorator that executes the wrapped function and captures any exception as the return value.
+
+        If the wrapped function raises an exception from the given cacheable_exceptions,
+        the exception object is returned instead of propagating it. This is used to extend
+        the functionality of the caches provided by the cachetools library which, by default
+        do not cache results when exceptions are raised.
+
+        Args:
+            func: The function to wrap.
+            cacheable_exceptions: A tuple of exception types that should be captured and returned.
+
+        Returns:
+            The result of the function, or the exception object if an exception was raised.
+        """
+
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except cacheable_exceptions as e:
+                return e
+
+        return wrapped
+
+    def _result_to_exception(self, func: Callable[P, R | Exception]) -> Callable[P, R]:
+        """Decorator that checks if the wrapped function returns an Exception and raises it.
+
+        If the wrapped function returns an Exception object, this decorator raises it.
+        Otherwise, it returns the result as normal. Useful for converting error-as-result
+        patterns back into standard exception propagation.
+
+        Args:
+            func: The function to wrap.
+
+        Returns:
+            The result of the function, or raises the exception if the result is an Exception.
+        """
+
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            result = func(*args, **kwargs)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        return wrapped
+
+    def _cache_with_selective_exceptions(self) -> Callable[[Callable[P, R]], Callable[P, R]]:
+        """Decorator which caches results of the wrapped function, including certain cacheable exceptions.
+
+        The caching primitives provided by the cachetools library do not cache results when exceptions
+        are raised by the wrapped function. This decorator allows caching certain exceptions by combining
+        three behaviors:
+
+        1. Captures certain exceptions as results (using _exception_to_result). See _CACHEABLE_EXCEPTIONS.
+        2. Caches the results (including captured exceptions) using cachetools.cached.
+        3. Propagates any captured exceptions as raised exceptions (using _result_to_exception).
+
+        Returns:
+            A decorator that applies all three behaviors in order.
+        """
+
+        def decorator(function):
+            decorated = self._exception_to_result(function, cacheable_exceptions=self._CACHEABLE_EXCEPTIONS)
+            decorated = cached(cache=self._server_health_cache, lock=self._cache_lock)(decorated)
+            decorated = self._result_to_exception(decorated)
+            return decorated
+
+        return decorator
+
+    @staticmethod
+    def _cache_with_selective_exceptions_and_self(func: Callable[P, R]) -> Callable[P, R]:
+        """Decorator to apply _cache_with_selective_exceptions to methods.
+
+        This is a helper to apply the caching decorator to instance methods that
+        need access to self.
+
+        Args:
+            func: The instance method to wrap.
+
+        Returns:
+            A decorator that can be applied to instance methods.
+        """
+
+        def wrapper(self, *args, **kwargs):
+            return self._cache_with_selective_exceptions()(func)(self, *args, **kwargs)
+
+        return wrapper
+
+    @_cache_with_selective_exceptions_and_self
+    def _get_server_health(self, server_name: str | None = None) -> list[dict] | dict:
+        """Get health information for one or all MCP servers.
+
+        Internal method that handles HTTP requests to mcpd daemon health endpoints.
+        Called by server_health() and other public methods.
+
+        Args:
+            server_name: Optional name of specific server. If None, gets all servers.
+
+        Returns:
+            Health data for the server(s). See server_health() for format details.
+
+        Raises:
+            See server_health() for all possible exceptions.
+        """
+        try:
+            if server_name:
+                url = f"{self._endpoint}/api/v1/health/servers/{server_name}"
+            else:
+                url = f"{self._endpoint}/api/v1/health/servers"
+            response = self._session.get(url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            return data if server_name else data.get("servers", [])
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError(f"Cannot connect to mcpd daemon at {self._endpoint}: {e}") from e
+        except requests.exceptions.Timeout as e:
+            operation = f"get health of {server_name}" if server_name else "get health of all servers"
+            raise TimeoutError("Request timed out after 5 seconds", operation=operation, timeout=5) from e
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                msg = (
+                    f"Authentication failed when accessing server '{server_name}': {e}"
+                    if server_name
+                    else f"Authentication failed: {e}"
+                )
+                raise AuthenticationError(msg) from e
+            elif e.response.status_code == 404:
+                assert server_name is not None
+                raise ServerNotFoundError(f"Server '{server_name}' not found", server_name=server_name) from e
+            else:
+                msg = (
+                    f"Error retrieving health status for server '{server_name}': {e}"
+                    if server_name
+                    else f"Error retrieving health status for all servers: {e}"
+                )
+                raise McpdError(msg) from e
+        except requests.exceptions.RequestException as e:
+            msg = (
+                f"Error retrieving health status for server '{server_name}': {e}"
+                if server_name
+                else f"Error retrieving health status for all servers: {e}"
+            )
+            raise McpdError(msg) from e
+
+    def server_health(self, server_name: str | None = None) -> dict[str, dict] | dict:
+        """Retrieve health information from one or all MCP servers.
+
+        This method queries the mcpd daemon for health status of MCP servers.
+        Health information includes status, latency, and timestamps of last checks.
+
+        When server_name is provided, it queries only that server. Otherwise, it retrieves
+        health information from all servers in a single query.
+
+        The returned health information is cached for performance using a TTL cache. Use
+        clear_server_health_cache() to force a fresh check.
+
+        Args:
+            server_name: Optional name of a specific server to query. If None,
+                         retrieves health information from all available servers.
+
+        Returns:
+            - If server_name is provided: The health information for that server.
+            - If server_name is None: A dictionary mapping server names to their health information.
+
+            Server health is a dictionary that contains:
+            - '$schema': A URL to the JSON schema
+            - 'name': The server identifier
+            - 'status': The current health status of the server ('ok', 'timeout', 'unreachable', 'unknown')
+            - 'latency': The latency of the server in milliseconds (optional)
+            - 'lastChecked': Time when ping was last attempted (optional)
+            - 'lastSuccessful': Time of the most recent successful ping (optional)
+
+        Raises:
+            ConnectionError: If unable to connect to the mcpd daemon.
+            TimeoutError: If requests to the daemon time out.
+            AuthenticationError: If API key authentication fails.
+            ServerNotFoundError: If the specified server doesn't exist (when server_name provided).
+            McpdError: For other daemon errors or API issues.
+
+        Examples:
+            >>> client = McpdClient(api_endpoint="http://localhost:8090")
+            >>>
+            >>> # Get health for a specific server
+            >>> health_info = client.server_health(server_name="time")
+            >>> print(health_info["status"])
+            ok
+            >>>
+            >>> # Check if a server failure is temporary (useful for retry logic)
+            >>> health_info = client.server_health(server_name="problematic_server")
+            >>> if HealthStatus.is_transient(health_info["status"]):
+            ...     print("Temporary issue, will retry")
+            ... else:
+            ...     print("Persistent problem, requires intervention")
+            >>>
+            >>> # Get health for all servers
+            >>> all_health = client.server_health()
+            >>> for server, health in all_health.items():
+            ...     print(f"{server}: {health['status']}")
+            fetch: ok
+            time: ok
+        """
+        if server_name:
+            return self._get_server_health(server_name)
+
+        try:
+            all_health = self._get_server_health()
+            all_health_by_server = {}
+            for health in all_health:
+                all_health_by_server[health["name"]] = health
+            return all_health_by_server
+        except McpdError as e:
+            raise McpdError(f"Could not retrieve all health information: {e}") from e
+
+    def _raise_for_server_health(self, server_name: str):
+        """Raise an error if the specified MCP server is not healthy.
+
+        This internal method checks server health and raises ServerUnhealthyError
+        if the server status is anything other than 'ok'. Used by methods that
+        require a healthy server before proceeding.
+
+        Args:
+            server_name: Name of the server to check.
+
+        Raises:
+            ServerUnhealthyError: If the server status is not 'ok'.
+            ConnectionError: If unable to connect to the mcpd daemon.
+            TimeoutError: If health check request times out.
+            AuthenticationError: If API key authentication fails.
+            ServerNotFoundError: If the specified server doesn't exist.
+            McpdError: For other daemon errors during health check.
+        """
+        health = self.server_health(server_name=server_name)
+        status = health["status"]
+        if not HealthStatus.is_healthy(status):
+            raise ServerUnhealthyError(
+                f"Server '{server_name}' is not healthy", server_name=server_name, health_status=status
+            )
+
+    def is_server_healthy(self, server_name: str) -> bool:
+        """Check if the specified MCP server is healthy.
+
+        This method queries the server's health status and determines whether the server is healthy
+        and therefore can handle requests or not. It's useful for validating an MCP server is ready
+        before attempting to call one of its tools.
+
+        Args:
+            server_name: The name of the MCP server to check.
+
+        Returns:
+            True if the server is healthy, False if the server is unhealthy or doesn't exist.
+
+        Raises:
+            ConnectionError: If unable to connect to the mcpd daemon.
+            TimeoutError: If the health check request times out.
+            AuthenticationError: If API key authentication fails.
+            McpdError: For other daemon errors that prevent checking health status.
+
+        Example:
+            >>> client = McpdClient(api_endpoint="http://localhost:8090")
+            >>>
+            >>> # Check before calling
+            >>> if client.is_server_healthy("time"):
+            ...     result = client.call.time.get_current_time(timezone="UTC")
+            ... else:
+            ...     print("The server is not ready to accept requests yet.")
+        """
+        try:
+            self._raise_for_server_health(server_name)
+            return True
+        except (ServerUnhealthyError, ServerNotFoundError):
+            # These specific exceptions represent servers that are unhealthy one way or another
+            return False
+
+    def clear_server_health_cache(self, server_name: str | None = None) -> None:
+        """Clear the cached health information for one or all MCP servers.
+
+        This method clears the internal cache that stores server health information.
+        Call this when server statuses may have changed to ensure server_health() fetches
+        fresh data from the mcpd daemon.
+
+        Call this method when:
+        - You want to force a fresh health check
+        - You want to clear stale or potentially incorrect health data
+
+        Note: Cache entries are automatically invalidated based on the TTL set
+        during initialization (see `server_health_cache_ttl`).
+
+        This only affects the internal server health cache used by server_health(). It does not
+        affect the mcpd daemon or MCP servers themselves.
+
+        Args:
+            server_name: The name of the MCP server to clear the cache for. If None, clears all caches.
+
+        Returns:
+            None
+
+        Example:
+            >>> client = McpdClient(api_endpoint="http://localhost:8090")
+            >>>
+            >>> # Initial server health check
+            >>> health_v1 = client.server_health("time")
+            >>>
+            >>> # ... Force a fresh health check ...
+            >>>
+            >>> # Clear cache to get updated health info
+            >>> client.clear_server_health_cache("time")
+            >>> health_v2 = client.server_health("time") # Fetches fresh health data
+        """
+        with self._cache_lock:
+            if server_name is None:
+                self._server_health_cache.clear()
+            else:
+                self._server_health_cache.pop((self, server_name), None)
