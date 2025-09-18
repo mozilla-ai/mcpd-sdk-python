@@ -229,6 +229,13 @@ class TestMcpdClient:
 
     @patch.object(McpdClient, "server_health")
     def test_is_healthy_error(self, mock_health, client):
+        # Test that ServerUnhealthyError returns False
+        mock_health.side_effect = ServerUnhealthyError(
+            "Server is unhealthy", server_name="test_server", health_status="unreachable"
+        )
+        result = client.is_server_healthy("test_server")
+        assert result is False
+
         # Test that ServerNotFoundError returns False
         mock_health.side_effect = ServerNotFoundError("Server not found", server_name="test_server")
         result = client.is_server_healthy("test_server")
