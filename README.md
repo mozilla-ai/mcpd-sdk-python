@@ -90,6 +90,15 @@ from mcpd import McpdClient
 # Assumes the mcpd daemon is running
 client = McpdClient(api_endpoint="http://localhost:8090")
 
+# Get all tools from all servers
+all_tools = client.agent_tools()
+
+# Get tools from specific servers only
+time_tools = client.agent_tools(servers=['time'])
+
+# Get tools from multiple servers
+subset_tools = client.agent_tools(servers=['time', 'fetch'])
+
 agent_config = AgentConfig(
     tools=client.agent_tools(),
     model_id="gpt-4.1-nano",  # Requires OPENAI_API_KEY to be set

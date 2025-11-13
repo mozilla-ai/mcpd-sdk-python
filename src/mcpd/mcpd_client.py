@@ -367,7 +367,7 @@ class McpdClient:
         except requests.exceptions.RequestException as e:
             raise McpdError(f"Error listing tool definitions for server '{server_name}': {e}") from e
 
-    def agent_tools(self) -> list[Callable[..., Any]]:
+    def agent_tools(self, servers: list[str] | None = None) -> list[Callable[..., Any]]:
         """Generate callable Python functions for all available tools, suitable for AI agents.
 
         This method queries all servers via `tools()` and creates self-contained,
@@ -377,6 +377,12 @@ class McpdClient:
 
         The generated functions are cached for performance. Use clear_agent_tools_cache()
         to force regeneration if servers or tools have changed.
+
+        Args:
+            servers: Optional list of server names to filter by.
+                     If None, returns tools from all servers.
+                     If specified, only tools from the listed servers are included.
+                     Non-existent server names are silently ignored.
 
         Returns:
             A list of callable functions, one for each tool across all servers.
@@ -404,6 +410,10 @@ class McpdClient:
             >>> tools = client.agent_tools()
             >>> print(f"Generated {len(tools)} callable tools")
             >>>
+            >>> # Get tools from specific servers only
+            >>> time_tools = client.agent_tools(servers=['time'])
+            >>> subset_tools = client.agent_tools(servers=['time', 'fetch'])
+            >>>
             >>> # Use with an AI agent framework
             >>> agent_config = AgentConfig(
             ...     tools=tools,
@@ -423,7 +433,16 @@ class McpdClient:
         agent_tools = []
         all_tools = self.tools()
 
-        for server_name, tool_schemas in all_tools.items():
+        # Determine which servers to use.
+        servers_to_use = all_tools.keys() if servers is None else servers
+
+        # Fetch tools from selected servers.
+        for server_name in servers_to_use:
+            if server_name not in all_tools:
+                # Server doesn't exist or has no tools - skip silently.
+                continue
+
+            tool_schemas = all_tools[server_name]
             for tool_schema in tool_schemas:
                 func = self._function_builder.create_function_from_schema(tool_schema, server_name)
                 agent_tools.append(func)
