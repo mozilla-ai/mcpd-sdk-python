@@ -55,3 +55,28 @@ def client(fqdn):
 @pytest.fixture(scope="function")
 def client_with_auth(fqdn):
     return McpdClient(api_endpoint=fqdn, api_key="test-key")  # pragma: allowlist secret
+
+
+@pytest.fixture
+def tools_side_effect():
+    """Factory for creating tools() mock side effects.
+
+    Returns a function that creates side_effect functions for mocking tools().
+    The side_effect returns the appropriate tool list based on server_name parameter.
+
+    Usage:
+        def test_something(tools_side_effect):
+            tools_map = {
+                "server1": [{"name": "tool1", "description": "Tool 1"}],
+                "server2": [{"name": "tool2", "description": "Tool 2"}],
+            }
+            mock_tools.side_effect = tools_side_effect(tools_map)
+    """
+
+    def _create_side_effect(tools_map: dict[str, list[dict]]):
+        def side_effect(server_name=None):
+            return tools_map.get(server_name, [])
+
+        return side_effect
+
+    return _create_side_effect

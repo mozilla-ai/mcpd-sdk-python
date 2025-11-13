@@ -367,13 +367,17 @@ class McpdClient:
         except requests.exceptions.RequestException as e:
             raise McpdError(f"Error listing tool definitions for server '{server_name}': {e}") from e
 
-    def agent_tools(self, servers: list[str] | None = None) -> list[Callable[..., Any]]:
+    def agent_tools(self, servers: list[str] | None = None, *, check_health: bool = True) -> list[Callable[..., Any]]:
         """Generate callable Python functions for all available tools, suitable for AI agents.
 
-        This method queries all servers via `tools()` and creates self-contained,
-        deepcopy-safe functions that can be passed to agentic frameworks like any-agent,
-        LangChain, or custom AI systems. Each function includes its schema as metadata
-        and handles the MCP communication internally.
+        This method queries servers and creates self-contained, deepcopy-safe functions
+        that can be passed to agentic frameworks like any-agent, LangChain, or custom AI
+        systems. Each function includes its schema as metadata and handles the MCP
+        communication internally.
+
+        By default, this method automatically filters out unhealthy servers by checking
+        their health status before fetching tools. Unhealthy servers are silently skipped
+        to ensure the method returns quickly without waiting for timeouts on failed servers.
 
         The generated functions are cached for performance. Use clear_agent_tools_cache()
         to force regeneration if servers or tools have changed.
@@ -384,8 +388,13 @@ class McpdClient:
                      If specified, only tools from the listed servers are included.
                      Non-existent server names are silently ignored.
 
+            check_health: Whether to filter to healthy servers only.
+                          If True (default), only returns tools from servers with 'ok' status.
+                          If False, returns tools from all servers regardless of health.
+                          Most users should leave this as True for best performance.
+
         Returns:
-            A list of callable functions, one for each tool across all servers.
+            A list of callable functions, one for each tool from healthy servers.
             Each function has the following attributes:
             - __name__: The tool's qualified name (e.g., "time__get_current_time")
             - __doc__: The tool's description
@@ -398,7 +407,8 @@ class McpdClient:
             TimeoutError: If requests to the daemon time out.
             AuthenticationError: If API key authentication fails.
             ServerNotFoundError: If a server becomes unavailable during tool retrieval.
-            McpdError: If unable to retrieve tool definitions or generate functions.
+            McpdError: If unable to retrieve server health status (when check_health=True)
+                      or retrieve tool definitions or generate functions.
 
         Example:
             >>> from any_agent import AnyAgent, AgentConfig
@@ -406,13 +416,16 @@ class McpdClient:
             >>>
             >>> client = McpdClient(api_endpoint="http://localhost:8090")
             >>>
-            >>> # Get all tools as callable functions
+            >>> # Get all tools from healthy servers (default)
             >>> tools = client.agent_tools()
             >>> print(f"Generated {len(tools)} callable tools")
             >>>
-            >>> # Get tools from specific servers only
+            >>> # Get tools from specific servers, only if healthy
             >>> time_tools = client.agent_tools(servers=['time'])
             >>> subset_tools = client.agent_tools(servers=['time', 'fetch'])
+            >>>
+            >>> # Get tools from all servers regardless of health (keyword-only argument)
+            >>> all_tools = client.agent_tools(check_health=False)
             >>>
             >>> # Use with an AI agent framework
             >>> agent_config = AgentConfig(
@@ -431,23 +444,53 @@ class McpdClient:
             but may not be suitable for pickling due to the embedded client state.
         """
         agent_tools = []
-        all_tools = self.tools()
 
         # Determine which servers to use.
-        servers_to_use = all_tools.keys() if servers is None else servers
+        servers_to_use = self.servers() if servers is None else servers
 
-        # Fetch tools from selected servers.
+        # Filter to healthy servers if requested (one HTTP call for all servers).
+        if check_health:
+            servers_to_use = self._get_healthy_servers(servers_to_use)
+
+        # Fetch tools from selected servers only (avoids fetching from unhealthy servers).
         for server_name in servers_to_use:
-            if server_name not in all_tools:
-                # Server doesn't exist or has no tools - skip silently.
+            try:
+                tool_schemas = self.tools(server_name=server_name)
+            except (ServerNotFoundError, ServerUnhealthyError):
+                # Server doesn't exist or became unhealthy - skip silently.
                 continue
 
-            tool_schemas = all_tools[server_name]
             for tool_schema in tool_schemas:
                 func = self._function_builder.create_function_from_schema(tool_schema, server_name)
                 agent_tools.append(func)
 
         return agent_tools
+
+    def _get_healthy_servers(self, server_names: list[str]) -> list[str]:
+        """Filter server names to only those that are healthy.
+
+        Args:
+            server_names: List of server names to filter.
+
+        Returns:
+            List of server names that have health status 'ok'.
+
+        Raises:
+            McpdError: If unable to retrieve server health information.
+
+        Note:
+            This method silently skips servers that don't exist or have
+            unhealthy status (timeout, unreachable, unknown).
+        """
+        health_map = self.server_health()
+
+        healthy_servers = [
+            name
+            for name in server_names
+            if name in health_map and HealthStatus.is_healthy(health_map[name].get("status"))
+        ]
+
+        return healthy_servers
 
     def has_tool(self, server_name: str, tool_name: str) -> bool:
         """Check if a specific tool exists on a given server.

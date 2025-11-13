@@ -90,14 +90,17 @@ from mcpd import McpdClient
 # Assumes the mcpd daemon is running
 client = McpdClient(api_endpoint="http://localhost:8090")
 
-# Get all tools from all servers
+# Get all tools from healthy servers (default - filters out unhealthy servers)
 all_tools = client.agent_tools()
 
-# Get tools from specific servers only
+# Get tools from specific servers, only if healthy
 time_tools = client.agent_tools(servers=['time'])
 
-# Get tools from multiple servers
+# Get tools from multiple servers, only if healthy
 subset_tools = client.agent_tools(servers=['time', 'fetch'])
+
+# Get tools from all servers regardless of health (not recommended)
+all_tools_unfiltered = client.agent_tools(check_health=False)
 
 agent_config = AgentConfig(
     tools=client.agent_tools(),
@@ -142,7 +145,7 @@ client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key"
 
 * `client.tools(server_name: str) -> list[dict]` - Returns the tool schema definitions for only the specified server.
 
-* `client.agent_tools() -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks.
+* `client.agent_tools(servers: list[str] | None = None, check_health: bool = True) -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks. By default, filters to healthy servers only. Use `servers` to filter by server names, or `check_health=False` to include all servers regardless of health.
 
 * `client.clear_agent_tools_cache()` - Clears cached generated callable functions that are created when calling agent_tools().
 
