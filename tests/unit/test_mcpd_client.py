@@ -227,13 +227,13 @@ class TestMcpdClient:
     @patch.object(McpdClient, "server_health")
     def test_agent_tools_with_empty_servers_list(self, mock_health, mock_tools, client):
         """Test filtering with empty server list."""
-        mock_health.return_value = {}
-
         with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
             result = client.agent_tools(servers=[])
 
             assert result == []
-            assert mock_create.call_count == 0
+            mock_health.assert_not_called()
+            mock_tools.assert_not_called()
+            mock_create.assert_not_called()
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -323,13 +323,15 @@ class TestMcpdClient:
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
-    def test_agent_tools_all_servers_unhealthy(self, mock_health, mock_tools, mock_servers, client):
+    def test_agent_tools_all_servers_unhealthy(self, mock_health, mock_tools, mock_servers, client, tools_side_effect):
         """Test behavior when all servers are unhealthy."""
         mock_servers.return_value = ["server1", "server2"]
-        mock_tools.return_value = {
-            "server1": [{"name": "tool1", "description": "Tool 1"}],
-            "server2": [{"name": "tool2", "description": "Tool 2"}],
-        }
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "server1": [{"name": "tool1", "description": "Tool 1"}],
+                "server2": [{"name": "tool2", "description": "Tool 2"}],
+            }
+        )
 
         mock_health.return_value = {
             "server1": {"status": "timeout"},
@@ -375,12 +377,14 @@ class TestMcpdClient:
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
-    def test_agent_tools_health_check_exception(self, mock_health, mock_tools, mock_servers, client):
+    def test_agent_tools_health_check_exception(self, mock_health, mock_tools, mock_servers, client, tools_side_effect):
         """Test behavior when health check raises exception."""
         mock_servers.return_value = ["server1"]
-        mock_tools.return_value = {
-            "server1": [{"name": "tool1", "description": "Tool 1"}],
-        }
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "server1": [{"name": "tool1", "description": "Tool 1"}],
+            }
+        )
 
         # Health check raises exception.
         mock_health.side_effect = Exception("Health check failed")

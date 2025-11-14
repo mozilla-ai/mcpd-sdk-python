@@ -394,7 +394,8 @@ class McpdClient:
                           Most users should leave this as True for best performance.
 
         Returns:
-            A list of callable functions, one for each tool from healthy servers.
+            A list of callable functions, one for each tool from healthy servers (if check_health=True, the default)
+            or all servers (if check_health=False).
             Each function has the following attributes:
             - __name__: The tool's qualified name (e.g., "time__get_current_time")
             - __doc__: The tool's description
@@ -406,7 +407,6 @@ class McpdClient:
             ConnectionError: If unable to connect to the mcpd daemon.
             TimeoutError: If requests to the daemon time out.
             AuthenticationError: If API key authentication fails.
-            ServerNotFoundError: If a server becomes unavailable during tool retrieval.
             McpdError: If unable to retrieve server health status (when check_health=True)
                       or retrieve tool definitions or generate functions.
 
@@ -482,6 +482,9 @@ class McpdClient:
             This method silently skips servers that don't exist or have
             unhealthy status (timeout, unreachable, unknown).
         """
+        if not server_names:
+            return []
+
         health_map = self.server_health()
 
         healthy_servers = [

@@ -145,7 +145,7 @@ client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key"
 
 * `client.tools(server_name: str) -> list[dict]` - Returns the tool schema definitions for only the specified server.
 
-* `client.agent_tools(servers: list[str] | None = None, check_health: bool = True) -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks. By default, filters to healthy servers only. Use `servers` to filter by server names, or `check_health=False` to include all servers regardless of health.
+* `client.agent_tools(servers: list[str] | None = None, *, check_health: bool = True) -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks. By default, filters to healthy servers only. Use `servers` to filter by server names, or `check_health=False` to include all servers regardless of health.
 
 * `client.clear_agent_tools_cache()` - Clears cached generated callable functions that are created when calling agent_tools().
 
