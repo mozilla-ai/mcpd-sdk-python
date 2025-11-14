@@ -6,7 +6,7 @@ application code to explicitly call tools on those MCP servers.
 ## Requirements
 
 * [uv](https://docs.astral.sh/uv/getting-started/installation/)
-* [mcpd](https://github.com/mozilla-ai/mcpd-cli) built (`make build`) and installed (`sudo make install`)
+* [mcpd](https://mozilla-ai.github.io/mcpd/installation/) installed
 * `OPENAI_API_KEY` exported - this will be used by [any-agent](https://github.com/mozilla-ai/any-agent)
 
 ## Starting `mcpd`
