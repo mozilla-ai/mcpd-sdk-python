@@ -21,7 +21,7 @@ source venv/bin/activate
 uv sync --group all
 ```
 
-### Step 3: Initialize a new MCPD project and add the GitHub MCP server
+### Step 3: Initialize a new mcpd project and add the GitHub MCP server
 ```bash
 mcpd init
 mcpd add github
@@ -33,7 +33,7 @@ export <PROVIDER>_API_KEY=your_<provider>_api_key # Required for the Agent, the 
 mcpd config env set github GITHUB_PERSONAL_ACCESS_TOKEN=your_github_token # Required by the GitHub MCP server
 ```
 
-### Step 5: Start the MCPD server
+### Step 5: Start the mcpd server
 ```bash
 mcpd daemon
 ```
