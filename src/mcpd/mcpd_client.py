@@ -406,7 +406,6 @@ class McpdClient:
             ConnectionError: If unable to connect to the mcpd daemon.
             TimeoutError: If requests to the daemon time out.
             AuthenticationError: If API key authentication fails.
-            ServerNotFoundError: If a server becomes unavailable during tool retrieval.
             McpdError: If unable to retrieve server health status (when check_health=True)
                       or retrieve tool definitions or generate functions.
 
@@ -482,6 +481,9 @@ class McpdClient:
             This method silently skips servers that don't exist or have
             unhealthy status (timeout, unreachable, unknown).
         """
+        if not server_names:
+            return []
+
         health_map = self.server_health()
 
         healthy_servers = [

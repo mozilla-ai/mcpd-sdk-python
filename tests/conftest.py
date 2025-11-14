@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from unittest.mock import Mock
 
 import pytest
@@ -73,8 +74,8 @@ def tools_side_effect():
             mock_tools.side_effect = tools_side_effect(tools_map)
     """
 
-    def _create_side_effect(tools_map: dict[str, list[dict]]):
-        def side_effect(server_name=None):
+    def _create_side_effect(tools_map: dict[str, list[dict]]) -> Callable[[str | None], list[dict]]:
+        def side_effect(server_name: str | None = None) -> list[dict]:
             return tools_map.get(server_name, [])
 
         return side_effect
