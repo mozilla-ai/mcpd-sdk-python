@@ -8,7 +8,7 @@ load_dotenv()  # Load the API key for the agent (using Mistral in this case)
 
 agent_model = "mistral:mistral-large-2411"
 
-# Connect to the MCPD server to enable the agent access the tools running on it.
+# Connect to the mcpd server to enable the agent access the tools running on it.
 client = McpdClient(api_endpoint="http://localhost:8090")
 
 agent = Agent(
