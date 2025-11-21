@@ -423,11 +423,10 @@ class McpdClient:
                            Defaults to false.
 
         Returns:
-            A list of callable functions, one for each matching tool from healthy servers
+            A list of callable functions, one for each matching tool from healthy servers.
             Each function has the following attributes:
             - __name__: The tool's qualified name (e.g., "time__get_current_time")
             - __doc__: The tool's description
-            - _schema: The original JSON Schema
             - _server_name: The server hosting this tool (original name)
             - _tool_name: The tool's name (original name)
 
@@ -435,7 +434,8 @@ class McpdClient:
             ConnectionError: If unable to connect to the mcpd daemon.
             TimeoutError: If requests to the daemon time out.
             AuthenticationError: If API key authentication fails.
-            McpdError: If unable to retrieve server health status or retrieve tool definitions or generate functions.
+            McpdError: If unable to retrieve server health status or generate functions.
+                      Servers for which tool schemas cannot be retrieved will be ignored.
 
         Examples:
             >>> from any_agent import AnyAgent, AgentConfig
@@ -511,7 +511,8 @@ class McpdClient:
             McpdError: If unable to retrieve server health status.
 
         Note:
-            When logging is enabled a warning will be logged for healthy servers that fail to return tool schemas.
+            Servers for which tool schemas cannot be retrieved will be ignored.
+            When logging is enabled a warning will be logged for these servers.
         """
         # Return cached functions if available.
         cached_functions = self._function_builder.get_cached_functions()

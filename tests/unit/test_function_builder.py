@@ -141,6 +141,9 @@ class TestFunctionBuilder:
         # Should be different instances but same functionality
         assert func1 is not func2
         assert func1.__name__ == func2.__name__
+        # Cached instances should preserve metadata attributes.
+        assert func1._server_name == func2._server_name == "test_server"
+        assert func1._tool_name == func2._tool_name == "test_tool"
 
     def test_create_annotations_basic_types(self, function_builder):
         schema = {
