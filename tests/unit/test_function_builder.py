@@ -245,3 +245,33 @@ class TestFunctionBuilder:
         # Should not raise an error due to name sanitization
         func = function_builder.create_function_from_schema(schema, "test-server")
         assert func.__name__ == "test_server__test_tool"
+
+    def test_function_has_server_name_attribute(self, function_builder):
+        """Test that generated function has _server_name attribute."""
+        schema = {"name": "test_tool", "description": "Test", "inputSchema": {}}
+
+        func = function_builder.create_function_from_schema(schema, "test_server")
+
+        assert hasattr(func, "_server_name")
+        assert func._server_name == "test_server"
+
+    def test_function_has_tool_name_attribute(self, function_builder):
+        """Test that generated function has _tool_name attribute."""
+        schema = {"name": "test_tool", "description": "Test", "inputSchema": {}}
+
+        func = function_builder.create_function_from_schema(schema, "test_server")
+
+        assert hasattr(func, "_tool_name")
+        assert func._tool_name == "test_tool"
+
+    def test_metadata_attributes_with_special_characters(self, function_builder):
+        """Test metadata attributes when names contain special characters."""
+        schema = {"name": "test-tool.v2", "description": "Test", "inputSchema": {}}
+
+        func = function_builder.create_function_from_schema(schema, "test-server")
+
+        # Function name should be sanitized.
+        assert func.__name__ == "test_server__test_tool_v2"
+        # But metadata should have original names.
+        assert func._server_name == "test-server"
+        assert func._tool_name == "test-tool.v2"

@@ -154,10 +154,14 @@ class TestMcpdClient:
             assert result == [mock_func1, mock_func2]
             assert mock_create.call_count == 2
 
+    @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
-    def test_agent_tools_filter_by_single_server(self, mock_health, mock_tools, client, tools_side_effect):
+    def test_agent_tools_filter_by_single_server(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
         """Test filtering tools by a single server name."""
+        mock_servers.return_value = ["server1", "server2"]
         mock_tools.side_effect = tools_side_effect(
             {
                 "server1": [{"name": "tool1", "description": "Test tool"}],
@@ -172,18 +176,27 @@ class TestMcpdClient:
 
         with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
             mock_func1 = Mock()
-            mock_create.return_value = mock_func1
+            mock_func1._server_name = "server1"
+            mock_func1._tool_name = "tool1"
+            mock_func2 = Mock()
+            mock_func2._server_name = "server2"
+            mock_func2._tool_name = "tool2"
+            mock_create.side_effect = [mock_func1, mock_func2]
 
             result = client.agent_tools(servers=["server1"])
 
+            # Cache is built from both servers, but filtered to only server1.
             assert result == [mock_func1]
-            assert mock_create.call_count == 1
-            mock_create.assert_called_once_with({"name": "tool1", "description": "Test tool"}, "server1")
+            assert mock_create.call_count == 2
 
+    @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
-    def test_agent_tools_filter_by_multiple_servers(self, mock_health, mock_tools, client, tools_side_effect):
+    def test_agent_tools_filter_by_multiple_servers(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
         """Test filtering tools by multiple server names."""
+        mock_servers.return_value = ["server1", "server2", "server3"]
         mock_tools.side_effect = tools_side_effect(
             {
                 "server1": [{"name": "tool1", "description": "Test tool"}],
@@ -200,40 +213,79 @@ class TestMcpdClient:
 
         with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
             mock_func1 = Mock()
+            mock_func1._server_name = "server1"
+            mock_func1._tool_name = "tool1"
             mock_func2 = Mock()
-            mock_create.side_effect = [mock_func1, mock_func2]
+            mock_func2._server_name = "server2"
+            mock_func2._tool_name = "tool2"
+            mock_func3 = Mock()
+            mock_func3._server_name = "server3"
+            mock_func3._tool_name = "tool3"
+            mock_create.side_effect = [mock_func1, mock_func2, mock_func3]
 
             result = client.agent_tools(servers=["server1", "server2"])
 
+            # Cache is built from all 3 servers, but filtered to only server1 and server2.
             assert result == [mock_func1, mock_func2]
-            assert mock_create.call_count == 2
+            assert mock_create.call_count == 3
 
+    @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
-    def test_agent_tools_with_nonexistent_server(self, mock_tools, client, tools_side_effect):
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_with_nonexistent_server(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
         """Test filtering with server that doesn't exist."""
+        mock_servers.return_value = ["server1"]
         mock_tools.side_effect = tools_side_effect(
             {
                 "server1": [{"name": "tool1", "description": "Test tool"}],
             }
         )
+        mock_health.return_value = {
+            "server1": {"status": "ok"},
+        }
 
         with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
-            result = client.agent_tools(servers=["nonexistent"], check_health=False)
+            mock_func1 = Mock()
+            mock_func1._server_name = "server1"
+            mock_func1._tool_name = "tool1"
+            mock_create.return_value = mock_func1
 
+            result = client.agent_tools(servers=["nonexistent"])
+
+            # Cache is built from server1, but filtered to nonexistent server.
             assert result == []
-            assert mock_create.call_count == 0
+            assert mock_create.call_count == 1
 
+    @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
-    def test_agent_tools_with_empty_servers_list(self, mock_health, mock_tools, client):
+    def test_agent_tools_with_empty_servers_list(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
         """Test filtering with empty server list."""
+        mock_servers.return_value = ["server1"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "server1": [{"name": "tool1", "description": "Test tool"}],
+            }
+        )
+        mock_health.return_value = {
+            "server1": {"status": "ok"},
+        }
+
         with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func1 = Mock()
+            mock_func1._server_name = "server1"
+            mock_func1._tool_name = "tool1"
+            mock_create.return_value = mock_func1
+
             result = client.agent_tools(servers=[])
 
+            # Cache is built from all servers, but filtered to empty list.
             assert result == []
-            mock_health.assert_not_called()
-            mock_tools.assert_not_called()
-            mock_create.assert_not_called()
+            assert mock_create.call_count == 1
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -298,30 +350,6 @@ class TestMcpdClient:
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
-    def test_agent_tools_no_health_check_when_disabled(self, mock_tools, mock_servers, client, tools_side_effect):
-        """Test that health checking can be disabled."""
-        mock_servers.return_value = ["server1", "server2"]
-        mock_tools.side_effect = tools_side_effect(
-            {
-                "server1": [{"name": "tool1", "description": "Tool 1"}],
-                "server2": [{"name": "tool2", "description": "Tool 2"}],
-            }
-        )
-
-        with (
-            patch.object(client._function_builder, "create_function_from_schema") as mock_create,
-            patch.object(client, "server_health") as mock_health,
-        ):
-            mock_create.side_effect = [Mock(), Mock()]
-
-            result = client.agent_tools(check_health=False)
-
-            # Should include both tools without checking health.
-            assert len(result) == 2
-            mock_health.assert_not_called()
-
-    @patch.object(McpdClient, "servers")
-    @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
     def test_agent_tools_all_servers_unhealthy(self, mock_health, mock_tools, mock_servers, client, tools_side_effect):
         """Test behavior when all servers are unhealthy."""
@@ -345,10 +373,14 @@ class TestMcpdClient:
             assert result == []
             mock_create.assert_not_called()
 
+    @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
-    def test_agent_tools_with_servers_and_health_filtering(self, mock_health, mock_tools, client, tools_side_effect):
+    def test_agent_tools_with_servers_and_health_filtering(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
         """Test combining server filtering and health filtering."""
+        mock_servers.return_value = ["server1", "server2", "server3"]
         mock_tools.side_effect = tools_side_effect(
             {
                 "server1": [{"name": "tool1", "description": "Tool 1"}],
@@ -365,14 +397,20 @@ class TestMcpdClient:
 
         with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
             mock_func1 = Mock()
-            mock_create.return_value = mock_func1
+            mock_func1._server_name = "server1"
+            mock_func1._tool_name = "tool1"
+            mock_func3 = Mock()
+            mock_func3._server_name = "server3"
+            mock_func3._tool_name = "tool3"
+            mock_create.side_effect = [mock_func1, mock_func3]
 
             # Request server1 and server2, but server2 is unhealthy.
             result = client.agent_tools(servers=["server1", "server2"])
 
-            # Should only include tool from server1.
+            # Cache is built from server1 and server3 (server2 is unhealthy and skipped).
+            # Filtered to only server1 and server2, but server2 not in cache.
             assert result == [mock_func1]
-            assert mock_create.call_count == 1
+            assert mock_create.call_count == 2
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -392,6 +430,269 @@ class TestMcpdClient:
         # Exception should propagate.
         with pytest.raises(Exception, match="Health check failed"):
             client.agent_tools()
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_filter_by_raw_tool_name(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test filtering by raw tool name (cross-cutting)."""
+        mock_servers.return_value = ["math", "calc"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "math": [
+                    {"name": "add", "description": "Add numbers"},
+                    {"name": "subtract", "description": "Subtract numbers"},
+                ],
+                "calc": [
+                    {"name": "add", "description": "Calculator add"},
+                    {"name": "multiply", "description": "Multiply"},
+                ],
+            }
+        )
+
+        mock_health.return_value = {
+            "math": {"status": "ok"},
+            "calc": {"status": "ok"},
+        }
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func1 = Mock()
+            mock_func1.__name__ = "math__add"
+            mock_func1._tool_name = "add"
+            mock_func2 = Mock()
+            mock_func2.__name__ = "calc__add"
+            mock_func2._tool_name = "add"
+            mock_func3 = Mock()
+            mock_func3.__name__ = "math__subtract"
+            mock_func3._tool_name = "subtract"
+            mock_func4 = Mock()
+            mock_func4.__name__ = "calc__multiply"
+            mock_func4._tool_name = "multiply"
+            mock_create.side_effect = [mock_func1, mock_func3, mock_func2, mock_func4]
+
+            result = client.agent_tools(tools=["add"])
+
+            # Should include 'add' from ALL servers that have it.
+            assert len(result) == 2
+            assert mock_create.call_count == 4  # All functions created, but only 2 match filter
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_filter_by_prefixed_tool_name(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test filtering by prefixed tool name (specific server+tool)."""
+        mock_servers.return_value = ["time", "other"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "time": [{"name": "get_current_time", "description": "Get time"}],
+                "other": [{"name": "get_current_time", "description": "Other time"}],
+            }
+        )
+
+        mock_health.return_value = {
+            "time": {"status": "ok"},
+            "other": {"status": "ok"},
+        }
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func1 = Mock()
+            mock_func1.__name__ = "time__get_current_time"
+            mock_func1._tool_name = "get_current_time"
+            mock_func2 = Mock()
+            mock_func2.__name__ = "other__get_current_time"
+            mock_func2._tool_name = "get_current_time"
+            mock_create.side_effect = [mock_func1, mock_func2]
+
+            result = client.agent_tools(tools=["time__get_current_time"])
+
+            # Should include only the exact match.
+            assert len(result) == 1
+            assert result[0].__name__ == "time__get_current_time"
+            assert mock_create.call_count == 2  # Both created, only one matches
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_filter_by_mixed_formats(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test filtering with both raw and prefixed names."""
+        mock_servers.return_value = ["math", "time"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "math": [{"name": "add", "description": "Add"}, {"name": "subtract", "description": "Subtract"}],
+                "time": [{"name": "get_current_time", "description": "Get time"}],
+            }
+        )
+
+        mock_health.return_value = {
+            "math": {"status": "ok"},
+            "time": {"status": "ok"},
+        }
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func1 = Mock()
+            mock_func1.__name__ = "math__add"
+            mock_func1._tool_name = "add"
+            mock_func2 = Mock()
+            mock_func2.__name__ = "math__subtract"
+            mock_func2._tool_name = "subtract"
+            mock_func3 = Mock()
+            mock_func3.__name__ = "time__get_current_time"
+            mock_func3._tool_name = "get_current_time"
+            mock_create.side_effect = [mock_func1, mock_func2, mock_func3]
+
+            result = client.agent_tools(tools=["add", "time__get_current_time"])
+
+            # Should include all 'add' tools plus the specific time tool.
+            assert len(result) == 2
+            assert mock_create.call_count == 3  # All created, only 2 match
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_filter_by_servers_and_tools(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test combining server and tool filtering."""
+        mock_servers.return_value = ["time", "math", "fetch"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "time": [{"name": "get_current_time", "description": "Get time"}],
+                "math": [{"name": "add", "description": "Add"}],
+                "fetch": [{"name": "fetch_url", "description": "Fetch"}],
+            }
+        )
+
+        mock_health.return_value = {
+            "time": {"status": "ok"},
+            "math": {"status": "ok"},
+            "fetch": {"status": "ok"},
+        }
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func1 = Mock()
+            mock_func1.__name__ = "time__get_current_time"
+            mock_func1._server_name = "time"
+            mock_func1._tool_name = "get_current_time"
+            mock_func2 = Mock()
+            mock_func2.__name__ = "math__add"
+            mock_func2._server_name = "math"
+            mock_func2._tool_name = "add"
+            mock_func3 = Mock()
+            mock_func3.__name__ = "fetch__fetch_url"
+            mock_func3._server_name = "fetch"
+            mock_func3._tool_name = "fetch_url"
+            mock_create.side_effect = [mock_func1, mock_func2, mock_func3]
+
+            result = client.agent_tools(servers=["time", "math"], tools=["add", "get_current_time"])
+
+            # Cache is built from all 3 servers, filtered by both servers and tools.
+            assert len(result) == 2
+            assert set(result) == {mock_func1, mock_func2}
+            assert mock_create.call_count == 3
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_filter_with_nonexistent_tool(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test filtering with tool that doesn't exist."""
+        mock_servers.return_value = ["time"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "time": [{"name": "get_current_time", "description": "Get time"}],
+            }
+        )
+
+        mock_health.return_value = {
+            "time": {"status": "ok"},
+        }
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func = Mock()
+            mock_func.__name__ = "time__get_current_time"
+            mock_func._tool_name = "get_current_time"
+            mock_create.return_value = mock_func
+
+            result = client.agent_tools(tools=["nonexistent_tool"])
+
+            # Should return empty list (function created but filtered out).
+            assert result == []
+            assert mock_create.call_count == 1
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_filter_with_empty_tools_list(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test filtering with empty tool list."""
+        mock_servers.return_value = ["time"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "time": [{"name": "get_current_time", "description": "Get time"}],
+            }
+        )
+
+        mock_health.return_value = {
+            "time": {"status": "ok"},
+        }
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func = Mock()
+            mock_func.__name__ = "time__get_current_time"
+            mock_func._tool_name = "get_current_time"
+            mock_create.return_value = mock_func
+
+            result = client.agent_tools(tools=[])
+
+            # Should return empty list (function created but empty filter matches nothing).
+            assert result == []
+            assert mock_create.call_count == 1
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_handles_tool_name_with_double_underscore(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test that tool names containing __ are handled correctly."""
+        mock_servers.return_value = ["test"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "test": [{"name": "my__special__tool", "description": "Special tool"}],
+            }
+        )
+
+        mock_health.return_value = {
+            "test": {"status": "ok"},
+        }
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func = Mock()
+            mock_func.__name__ = "test__my__special__tool"
+            mock_func._tool_name = "my__special__tool"
+            mock_create.return_value = mock_func
+
+            # Filter by raw name (should work).
+            result = client.agent_tools(tools=["my__special__tool"])
+            assert len(result) == 1
+            assert mock_create.call_count == 1
+
+            # Reset mock.
+            mock_create.reset_mock()
+            mock_create.return_value = mock_func
+
+            # Filter by prefixed name (should work).
+            result = client.agent_tools(tools=["test__my__special__tool"])
+            assert len(result) == 1
+            assert mock_create.call_count == 1
 
     @patch.object(McpdClient, "tools")
     def test_has_tool_exists(self, mock_tools, client):
