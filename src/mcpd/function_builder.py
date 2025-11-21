@@ -11,7 +11,7 @@ The generated functions are self-contained and cached for performance.
 from __future__ import annotations
 
 import re
-from types import FunctionType
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .exceptions import McpdError, ValidationError
@@ -19,6 +19,13 @@ from .type_converter import TypeConverter
 
 if TYPE_CHECKING:
     from .mcpd_client import McpdClient
+
+TOOL_SEPARATOR = "__"
+"""Separator used between server name and tool name in qualified tool names.
+
+Format: `{serverName}{TOOL_SEPARATOR}{toolName}`
+Example: "time__get_current_time" where "time" is server and "get_current_time" is tool.
+"""
 
 
 class FunctionBuilder:
@@ -88,18 +95,18 @@ class FunctionBuilder:
         """Generate a unique function name from server and tool names.
 
         This method creates a qualified function name by combining the server name
-        and tool name with a double underscore separator. Both names are sanitized
-        using _safe_name() to ensure the result is a valid Python identifier.
+        and tool name with TOOL_SEPARATOR. Both names are sanitized using _safe_name()
+        to ensure the result is a valid Python identifier.
 
-        The double underscore convention helps distinguish the server and tool
-        components while maintaining uniqueness across the entire function namespace.
+        The separator helps distinguish the server and tool components while maintaining
+        uniqueness across the entire function namespace.
 
         Args:
             server_name: The name of the MCP server hosting the tool.
             schema_name: The name of the tool from the schema definition.
 
         Returns:
-            A qualified function name in the format "{safe_server}__{safe_tool}".
+            A qualified function name in the format "{safe_server}{TOOL_SEPARATOR}{safe_tool}".
             The result is guaranteed to be a valid Python identifier.
 
         Example:
@@ -112,11 +119,11 @@ class FunctionBuilder:
 
         Note:
             This naming convention allows the generated function to be introspected
-            to determine its originating server and tool names by splitting on '__'.
+            to determine its originating server and tool names by splitting on TOOL_SEPARATOR.
         """
-        return f"{self._safe_name(server_name)}__{self._safe_name(schema_name)}"
+        return f"{self._safe_name(server_name)}{TOOL_SEPARATOR}{self._safe_name(schema_name)}"
 
-    def create_function_from_schema(self, schema: dict[str, Any], server_name: str) -> FunctionType:
+    def create_function_from_schema(self, schema: dict[str, Any], server_name: str) -> Callable[..., Any]:
         """Create a callable Python function from an MCP tool's JSON Schema definition.
 
         This method generates a self-contained, callable function that validates parameters
@@ -143,6 +150,8 @@ class FunctionBuilder:
             - Comprehensive docstring with parameter descriptions
             - Raises ValidationError for missing required parameters
             - Returns the tool's execution result via client._perform_call()
+            - Has _server_name attribute containing the originating server name
+            - Has _tool_name attribute containing the original tool name
 
         Raises:
             McpdError: If function compilation fails due to invalid schema,
@@ -167,9 +176,9 @@ class FunctionBuilder:
         Note:
             The generated function includes validation logic that checks for required
             parameters at runtime and builds a parameters dictionary for the API call.
-            The function is cached using a key of "{server_name}__{tool_name}".
+            The function is cached using a key of "{server_name}{TOOL_SEPARATOR}{tool_name}".
         """
-        cache_key = f"{server_name}__{schema.get('name', '')}"
+        cache_key = f"{server_name}{TOOL_SEPARATOR}{schema.get('name', '')}"
 
         if cache_key in self._function_cache:
             cached_func = self._function_cache[cache_key]
@@ -187,12 +196,19 @@ class FunctionBuilder:
             created_function = namespace[function_name]
             created_function.__annotations__ = annotations
 
+            # Add metadata attributes.
+            created_function._server_name = server_name
+            created_function._tool_name = schema["name"]
+
             # Cache the function creation details
-            def create_function_instance(annotations: dict[str, Any]) -> FunctionType:
+            def create_function_instance(annotations: dict[str, Any]) -> Callable[..., Any]:
                 temp_namespace = namespace.copy()
                 exec(compiled_code, temp_namespace)
                 new_func = temp_namespace[function_name]
                 new_func.__annotations__ = annotations.copy()
+                # Add metadata attributes to cached instances as well.
+                new_func._server_name = server_name
+                new_func._tool_name = schema["name"]
                 return new_func
 
             self._function_cache[cache_key] = {
@@ -601,3 +617,11 @@ class FunctionBuilder:
             >>> func3 = builder.create_function_from_schema(schema, "server1")  # Recompiles
         """
         self._function_cache.clear()
+
+    def get_cached_functions(self) -> list[Callable[..., Any]]:
+        """Get all cached functions.
+
+        Returns:
+            List of all cached agent functions, or empty list if cache is empty.
+        """
+        return [cached["create_function"](cached["annotations"]) for cached in self._function_cache.values()]

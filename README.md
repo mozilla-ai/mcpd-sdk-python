@@ -99,8 +99,17 @@ time_tools = client.agent_tools(servers=['time'])
 # Get tools from multiple servers, only if healthy
 subset_tools = client.agent_tools(servers=['time', 'fetch'])
 
-# Get tools from all servers regardless of health (not recommended)
-all_tools_unfiltered = client.agent_tools(check_health=False)
+# Filter by tool names (cross-cutting)
+math_tools = client.agent_tools(tools=['add', 'multiply'])
+
+# Filter by qualified tool names
+specific = client.agent_tools(tools=['time__get_current_time'])
+
+# Combine server and tool filtering
+filtered = client.agent_tools(
+    servers=['time', 'math'],
+    tools=['add', 'get_current_time']
+)
 
 agent_config = AgentConfig(
     tools=client.agent_tools(),
@@ -111,6 +120,20 @@ agent = AnyAgent.create("mcpd-agent", agent_config)
 
 response = agent.run("What is the current time in Tokyo?")
 print(response)
+```
+
+> [!IMPORTANT]
+> Generated functions are cached for performance. Once cached, subsequent calls to `agent_tools()` return
+> the cached functions immediately without refetching schemas, regardless of filter parameters.
+> Use `refresh_cache=True` or call `client.clear_agent_tools_cache()` to force regeneration when tool schemas have changed.
+
+```python
+# Force refresh cache to get latest schemas
+fresh_tools = client.agent_tools(refresh_cache=True)
+
+# Or clear cache manually and call again
+client.clear_agent_tools_cache()
+fresh_tools = client.agent_tools()
 ```
 
 ## Examples
@@ -145,9 +168,9 @@ client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key"
 
 * `client.tools(server_name: str) -> list[dict]` - Returns the tool schema definitions for only the specified server.
 
-* `client.agent_tools(servers: list[str] | None = None, *, check_health: bool = True) -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks. By default, filters to healthy servers only. Use `servers` to filter by server names, or `check_health=False` to include all servers regardless of health.
+* `client.agent_tools(servers: list[str] | None = None, tools: list[str] | None = None, *, refresh_cache: bool = False) -> list[Callable]` - Returns a list of self-contained, callable functions suitable for agentic frameworks. By default, filters to healthy servers only. Use `servers` to filter by server names, `tools` to filter by tool names (supports both raw names like `'add'` and prefixed names like `'time__get_current_time'`), or `refresh_cache=True` to force regeneration of cached functions. Functions are cached - subsequent calls return cached functions immediately without refetching schemas.
 
-* `client.clear_agent_tools_cache()` - Clears cached generated callable functions that are created when calling agent_tools().
+* `client.clear_agent_tools_cache()` - Clears cached generated callable functions. Call this to force regeneration when tool schemas have changed.
 
 * `client.has_tool(server_name: str, tool_name: str) -> bool` - Checks if a specific tool exists on a given server.
 
