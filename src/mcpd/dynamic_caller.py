@@ -10,9 +10,11 @@ a fluent interface that resolves server and tool names at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .exceptions import ToolNotFoundError
+from .function_builder import TOOL_SEPARATOR
 
 if TYPE_CHECKING:
     from .mcpd_client import McpdClient
@@ -109,7 +111,7 @@ class ServerProxy:
         self._client = client
         self._server_name = server_name
 
-    def __getattr__(self, tool_name: str) -> callable:
+    def __getattr__(self, tool_name: str) -> Callable:
         """Create a callable function for the specified tool.
 
         When you access an attribute on a ServerProxy (e.g., time_server.get_current_time),
@@ -161,7 +163,7 @@ class ServerProxy:
             return self._client._perform_call(self._server_name, tool_name, kwargs)
 
         # Add metadata to help with debugging and introspection
-        tool_function.__name__ = f"{self._server_name}__{tool_name}"
+        tool_function.__name__ = f"{self._server_name}{TOOL_SEPARATOR}{tool_name}"
         tool_function.__qualname__ = f"ServerProxy.{tool_name}"
 
         return tool_function
