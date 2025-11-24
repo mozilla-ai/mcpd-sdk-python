@@ -12,6 +12,7 @@ This package provides:
 - Comprehensive error handling: Detailed exceptions for different failure modes
 """
 
+from ._logger import Logger, LogLevel
 from .exceptions import (
     AuthenticationError,
     ConnectionError,
@@ -28,6 +29,8 @@ from .mcpd_client import HealthStatus, McpdClient
 __all__ = [
     "McpdClient",
     "HealthStatus",
+    "Logger",
+    "LogLevel",
     "McpdError",
     "AuthenticationError",
     "ConnectionError",

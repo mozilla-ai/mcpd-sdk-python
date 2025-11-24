@@ -157,6 +157,7 @@ from mcpd import McpdClient
 # Initialize the client with your mcpd API endpoint.
 # api_key is optional and sends an 'MCPD-API-KEY' header.
 # server_health_cache_ttl is optional and sets the time in seconds to cache a server health response.
+# logger is optional and allows you to provide a custom logger implementation (see Logging section).
 client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key", server_health_cache_ttl=10)
 ```
 
@@ -181,6 +182,94 @@ client = McpdClient(api_endpoint="http://localhost:8090", api_key="optional-key"
 * `client.server_health(server_name: str) -> dict` - Returns the health information for only the specified server.
 
 * `client.is_server_healthy(server_name: str) -> bool` - Checks if the specified server is healthy and can handle requests.
+
+## Logging
+
+The SDK includes built-in logging infrastructure that can be enabled via the `MCPD_LOG_LEVEL` environment variable. Logging is disabled by default to avoid contaminating stdout/stderr.
+
+> [!IMPORTANT]
+> Only enable `MCPD_LOG_LEVEL` in non-MCP-server contexts. MCP servers can use stdout for JSON-RPC communication,
+> and any logging output will break the protocol.
+
+### Available Log Levels
+
+Set the `MCPD_LOG_LEVEL` environment variable to one of the following values (from most to least verbose):
+
+* `trace` - Most verbose logging (includes all levels below)
+* `debug` - Debug-level logging
+* `info` - Informational logging
+* `warn` - Warning-level logging (recommended for most use cases)
+* `error` - Error-level logging only
+* `off` - Disable all logging (default)
+
+### Example Usage
+
+```bash
+# Enable warning-level logging
+export MCPD_LOG_LEVEL=warn
+python your_script.py
+```
+
+```python
+from mcpd import McpdClient
+
+# Warnings will be logged to stderr when MCPD_LOG_LEVEL=warn
+client = McpdClient(api_endpoint="http://localhost:8090")
+
+# For example, the SDK will log warnings for:
+# - Non-existent servers when calling agent_tools()
+# - Unhealthy servers when calling agent_tools()
+# - Servers that become unavailable during tool fetching
+```
+
+### Custom Logger
+
+You can provide your own logger implementation that implements the `Logger` protocol:
+
+```python
+from mcpd import McpdClient, Logger
+
+class CustomLogger:
+    def trace(self, msg: str, *args: object) -> None:
+        print(f"TRACE: {msg % args}")
+
+    def debug(self, msg: str, *args: object) -> None:
+        print(f"DEBUG: {msg % args}")
+
+    def info(self, msg: str, *args: object) -> None:
+        print(f"INFO: {msg % args}")
+
+    def warn(self, msg: str, *args: object) -> None:
+        print(f"WARN: {msg % args}")
+
+    def error(self, msg: str, *args: object) -> None:
+        print(f"ERROR: {msg % args}")
+
+# Use custom logger
+client = McpdClient(
+    api_endpoint="http://localhost:8090",
+    logger=CustomLogger()
+)
+```
+
+You can also provide a partial logger implementation. Any omitted methods will fall back to the default logger (which respects `MCPD_LOG_LEVEL`):
+
+```python
+class PartialLogger:
+    def warn(self, msg: str, *args: object) -> None:
+        # Custom warning handler
+        print(f"CUSTOM WARN: {msg % args}")
+
+    def error(self, msg: str, *args: object) -> None:
+        # Custom error handler
+        print(f"CUSTOM ERROR: {msg % args}")
+    # trace, debug, info use default logger (respects MCPD_LOG_LEVEL)
+
+client = McpdClient(
+    api_endpoint="http://localhost:8090",
+    logger=PartialLogger()
+)
+```
 
 ## Error Handling
 

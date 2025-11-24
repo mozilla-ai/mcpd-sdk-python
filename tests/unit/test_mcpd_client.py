@@ -963,3 +963,187 @@ class TestMcpdClient:
         result2 = client.server_health("test_server")
         assert result2 == {"name": "test_server", "status": "ok"}
         assert mock_get.call_count == 2
+
+
+class TestLogger:
+    """Tests for logger integration in McpdClient."""
+
+    def test_logger_initialization_default(self, monkeypatch):
+        """Test that client initializes with default logger."""
+        monkeypatch.setenv("MCPD_LOG_LEVEL", "warn")
+        client = McpdClient(api_endpoint="http://localhost:8090")
+        assert client._logger is not None
+        assert hasattr(client._logger, "warn")
+        assert hasattr(client._logger, "error")
+
+    def test_logger_initialization_custom(self):
+        """Test that client accepts custom logger."""
+
+        class CustomLogger:
+            def __init__(self):
+                self.warnings = []
+                self.errors = []
+
+            def trace(self, msg: str, *args: object) -> None:
+                pass
+
+            def debug(self, msg: str, *args: object) -> None:
+                pass
+
+            def info(self, msg: str, *args: object) -> None:
+                pass
+
+            def warn(self, msg: str, *args: object) -> None:
+                self.warnings.append(msg % args)
+
+            def error(self, msg: str, *args: object) -> None:
+                self.errors.append(msg % args)
+
+        custom_logger = CustomLogger()
+        client = McpdClient(api_endpoint="http://localhost:8090", logger=custom_logger)
+        assert client._logger is custom_logger
+
+    @patch.object(McpdClient, "server_health")
+    def test_get_healthy_servers_logs_nonexistent(self, mock_health, monkeypatch):
+        """Test that _get_healthy_servers logs warning for non-existent server."""
+        monkeypatch.setenv("MCPD_LOG_LEVEL", "warn")
+
+        class CustomLogger:
+            def __init__(self):
+                self.warnings = []
+
+            def trace(self, msg: str, *args: object) -> None:
+                pass
+
+            def debug(self, msg: str, *args: object) -> None:
+                pass
+
+            def info(self, msg: str, *args: object) -> None:
+                pass
+
+            def warn(self, msg: str, *args: object) -> None:
+                self.warnings.append(msg % args)
+
+            def error(self, msg: str, *args: object) -> None:
+                pass
+
+        custom_logger = CustomLogger()
+        client = McpdClient(api_endpoint="http://localhost:8090", logger=custom_logger)
+
+        # Mock health check to return only server1, not server2.
+        mock_health.return_value = {
+            "server1": {"status": "ok"},
+        }
+
+        result = client._get_healthy_servers(["server1", "server2"])
+
+        # Should only return server1.
+        assert result == ["server1"]
+
+        # Should log warning for non-existent server2.
+        assert len(custom_logger.warnings) == 1
+        assert "Skipping non-existent server 'server2'" in custom_logger.warnings[0]
+
+    @patch.object(McpdClient, "server_health")
+    def test_get_healthy_servers_logs_unhealthy(self, mock_health, monkeypatch):
+        """Test that _get_healthy_servers logs warning for unhealthy server."""
+        monkeypatch.setenv("MCPD_LOG_LEVEL", "warn")
+
+        class CustomLogger:
+            def __init__(self):
+                self.warnings = []
+
+            def trace(self, msg: str, *args: object) -> None:
+                pass
+
+            def debug(self, msg: str, *args: object) -> None:
+                pass
+
+            def info(self, msg: str, *args: object) -> None:
+                pass
+
+            def warn(self, msg: str, *args: object) -> None:
+                self.warnings.append(msg % args)
+
+            def error(self, msg: str, *args: object) -> None:
+                pass
+
+        custom_logger = CustomLogger()
+        client = McpdClient(api_endpoint="http://localhost:8090", logger=custom_logger)
+
+        # Mock health check with unhealthy server.
+        mock_health.return_value = {
+            "server1": {"status": "ok"},
+            "server2": {"status": "timeout"},
+        }
+
+        result = client._get_healthy_servers(["server1", "server2"])
+
+        # Should only return server1.
+        assert result == ["server1"]
+
+        # Should log warning for unhealthy server2.
+        assert len(custom_logger.warnings) == 1
+        assert "Skipping unhealthy server 'server2' with status 'timeout'" in custom_logger.warnings[0]
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_logs_tool_fetch_error(self, mock_health, mock_tools, mock_servers, monkeypatch):
+        """Test that _agent_tools logs warning when tool fetch fails."""
+        monkeypatch.setenv("MCPD_LOG_LEVEL", "warn")
+
+        class CustomLogger:
+            def __init__(self):
+                self.warnings = []
+
+            def trace(self, msg: str, *args: object) -> None:
+                pass
+
+            def debug(self, msg: str, *args: object) -> None:
+                pass
+
+            def info(self, msg: str, *args: object) -> None:
+                pass
+
+            def warn(self, msg: str, *args: object) -> None:
+                self.warnings.append(msg % args)
+
+            def error(self, msg: str, *args: object) -> None:
+                pass
+
+        custom_logger = CustomLogger()
+        client = McpdClient(api_endpoint="http://localhost:8090", logger=custom_logger)
+
+        mock_servers.return_value = ["server1", "server2"]
+        mock_health.return_value = {
+            "server1": {"status": "ok"},
+            "server2": {"status": "ok"},
+        }
+
+        # server1 succeeds, server2 fails during tool fetch.
+        def tools_side_effect(server_name=None):
+            if server_name == "server1":
+                return [{"name": "tool1", "description": "Tool 1"}]
+            elif server_name == "server2":
+                raise McpdError("Connection failed")
+            return []
+
+        mock_tools.side_effect = tools_side_effect
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_func = Mock()
+            mock_func._server_name = "server1"
+            mock_func._tool_name = "tool1"
+            mock_create.return_value = mock_func
+
+            result = client.agent_tools()
+
+            # Should only return tool from server1.
+            assert len(result) == 1
+            assert result[0]._server_name == "server1"
+
+            # Should log warning for server2 tool fetch failure.
+            assert len(custom_logger.warnings) == 1
+            assert "Server 'server2' became unavailable or unhealthy during tool fetch" in custom_logger.warnings[0]
+            assert "Connection failed" in custom_logger.warnings[0]
