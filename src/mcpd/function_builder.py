@@ -349,7 +349,6 @@ class FunctionBuilder:
             "",
             "    # Build parameters dictionary",
             "    params = {}",
-            "    locals_dict = locals()",
             "",
             f"    for param_name in {list(properties.keys())}:",
             "        if param_name in locals_dict and locals_dict[param_name] is not None:",
