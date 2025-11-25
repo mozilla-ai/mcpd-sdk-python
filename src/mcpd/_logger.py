@@ -81,7 +81,7 @@ def _resolve_log_level(raw: str | None) -> str:
         Valid log level string matching LogLevel enum values.
         Returns LogLevel.OFF.value if raw is None, empty, or not a valid level.
     """
-    candidate = raw.lower() if raw else None
+    candidate = raw.strip().lower() if raw else None
     return candidate if candidate and candidate in _RANKS else LogLevel.OFF.value
 
 

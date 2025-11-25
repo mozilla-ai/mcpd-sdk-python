@@ -227,23 +227,26 @@ client = McpdClient(api_endpoint="http://localhost:8090")
 You can provide your own logger implementation that implements the `Logger` protocol:
 
 ```python
+import sys
 from mcpd import McpdClient, Logger
 
 class CustomLogger:
+    """Custom logger that writes to stderr (safe for MCP server contexts)."""
+
     def trace(self, msg: str, *args: object) -> None:
-        print(f"TRACE: {msg % args}")
+        print(f"TRACE: {msg % args}", file=sys.stderr)
 
     def debug(self, msg: str, *args: object) -> None:
-        print(f"DEBUG: {msg % args}")
+        print(f"DEBUG: {msg % args}", file=sys.stderr)
 
     def info(self, msg: str, *args: object) -> None:
-        print(f"INFO: {msg % args}")
+        print(f"INFO: {msg % args}", file=sys.stderr)
 
     def warn(self, msg: str, *args: object) -> None:
-        print(f"WARN: {msg % args}")
+        print(f"WARN: {msg % args}", file=sys.stderr)
 
     def error(self, msg: str, *args: object) -> None:
-        print(f"ERROR: {msg % args}")
+        print(f"ERROR: {msg % args}", file=sys.stderr)
 
 # Use custom logger
 client = McpdClient(
@@ -255,14 +258,18 @@ client = McpdClient(
 You can also provide a partial logger implementation. Any omitted methods will fall back to the default logger (which respects `MCPD_LOG_LEVEL`):
 
 ```python
+import sys
+
 class PartialLogger:
+    """Partial logger - only override warn/error, others use default."""
+
     def warn(self, msg: str, *args: object) -> None:
-        # Custom warning handler
-        print(f"CUSTOM WARN: {msg % args}")
+        # Custom warning handler (writes to stderr).
+        print(f"CUSTOM WARN: {msg % args}", file=sys.stderr)
 
     def error(self, msg: str, *args: object) -> None:
-        # Custom error handler
-        print(f"CUSTOM ERROR: {msg % args}")
+        # Custom error handler (writes to stderr).
+        print(f"CUSTOM ERROR: {msg % args}", file=sys.stderr)
     # trace, debug, info use default logger (respects MCPD_LOG_LEVEL)
 
 client = McpdClient(
