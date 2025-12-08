@@ -18,6 +18,7 @@ from typing import Any, ParamSpec, Protocol, TypeVar
 import requests
 from cachetools import TTLCache, cached
 
+from ._logger import Logger, create_logger
 from .dynamic_caller import DynamicCaller
 from .exceptions import (
     AuthenticationError,
@@ -109,7 +110,13 @@ class McpdClient:
     """Maximum number of server health entries to cache.
     Prevents unbounded memory growth while allowing legitimate large-scale monitoring."""
 
-    def __init__(self, api_endpoint: str, api_key: str | None = None, server_health_cache_ttl: float = 10):
+    def __init__(
+        self,
+        api_endpoint: str,
+        api_key: str | None = None,
+        server_health_cache_ttl: float = 10,
+        logger: Logger | None = None,
+    ) -> None:
         """Initialize a new McpdClient instance.
 
         Args:
@@ -119,6 +126,8 @@ class McpdClient:
                     will be included in all requests as "Authorization: Bearer {api_key}".
             server_health_cache_ttl: Time to live in seconds for the cache of
                                     the server health API calls. A value of 0 means no caching.
+            logger: Optional custom Logger implementation. If None, uses the default logger
+                   controlled by the MCPD_LOG_LEVEL environment variable.
 
         Raises:
             ValueError: If api_endpoint is empty or invalid.
@@ -140,6 +149,7 @@ class McpdClient:
         self._session = requests.Session()
 
         # Initialize components
+        self._logger = create_logger(logger)
         self._function_builder = FunctionBuilder(self)
 
         # Set up authentication
@@ -524,9 +534,9 @@ class McpdClient:
         for server_name in healthy_servers:
             try:
                 tool_schemas = self.tools(server_name=server_name)
-            except (ConnectionError, TimeoutError, AuthenticationError, ServerNotFoundError, McpdError):
+            except (ConnectionError, TimeoutError, AuthenticationError, ServerNotFoundError, McpdError) as e:
                 # These servers were reported as healthy, so failures for schemas would be unexpected.
-                # TODO: self._logger.warn(f"Failed to retrieve tool schema for server '{name}'") # include exception
+                self._logger.warn("Server '%s' became unavailable or unhealthy during tool fetch: %s", server_name, e)
                 continue
 
             for tool_schema in tool_schemas:
@@ -557,11 +567,15 @@ class McpdClient:
             health = health_map.get(name)
 
             if not health:
-                # TODO: self._logger.warn(f"Skipping non-existent server '{name}'")
+                self._logger.warn("Skipping non-existent server '%s'", name)
                 return False
 
-            return HealthStatus.is_healthy(health.get("status"))
-            # TODO: self._logger.warn(f"Skipping unhealthy server '{name}' with status '{status}'")
+            status = health.get("status")
+            if not HealthStatus.is_healthy(status):
+                self._logger.warn("Skipping unhealthy server '%s' with status '%s'", name, status)
+                return False
+
+            return True
 
         return [name for name in server_names if is_valid(name)]
 
