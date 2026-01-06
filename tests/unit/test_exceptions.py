@@ -5,9 +5,13 @@ import requests
 
 from mcpd import McpdClient
 from mcpd.exceptions import (
+    _PIPELINE_ERROR_FLOWS,
+    PIPELINE_FLOW_REQUEST,
+    PIPELINE_FLOW_RESPONSE,
     AuthenticationError,
     ConnectionError,
     McpdError,
+    PipelineError,
     ServerNotFoundError,
     ServerUnhealthyError,
     TimeoutError,
@@ -126,6 +130,7 @@ class TestExceptionHierarchy:
         """Verify exception hierarchy."""
         assert issubclass(ConnectionError, McpdError)
         assert issubclass(AuthenticationError, McpdError)
+        assert issubclass(PipelineError, McpdError)
         assert issubclass(ServerNotFoundError, McpdError)
         assert issubclass(ServerUnhealthyError, McpdError)
         assert issubclass(ToolNotFoundError, McpdError)
@@ -138,6 +143,7 @@ class TestExceptionHierarchy:
         exceptions = [
             ConnectionError("test"),
             AuthenticationError("test"),
+            PipelineError("test", server_name="server1", operation="server1.tool1", pipeline_flow="request"),
             ServerNotFoundError("test", server_name="server1"),
             ServerUnhealthyError("test", server_name="server1", health_status="timeout"),
             ToolNotFoundError("test", server_name="server1", tool_name="tool1"),
@@ -453,3 +459,152 @@ class TestValidationError:
         """Test ValidationError with no specific errors."""
         exc = ValidationError("Validation failed")
         assert exc.validation_errors == []
+
+
+class TestPipelineError:
+    """Test PipelineError is raised appropriately."""
+
+    def test_pipeline_error_attributes(self):
+        """Test PipelineError stores all attributes."""
+        exc = PipelineError(
+            "Pipeline failure",
+            server_name="test_server",
+            operation="test_server.test_tool",
+            pipeline_flow=PIPELINE_FLOW_REQUEST,
+        )
+        assert exc.server_name == "test_server"
+        assert exc.operation == "test_server.test_tool"
+        assert exc.pipeline_flow == PIPELINE_FLOW_REQUEST
+        assert "Pipeline failure" in str(exc)
+
+    def test_pipeline_error_response_flow(self):
+        """Test PipelineError with response flow."""
+        exc = PipelineError(
+            "Response pipeline failed",
+            server_name="time",
+            operation="time.get_current_time",
+            pipeline_flow=PIPELINE_FLOW_RESPONSE,
+        )
+        assert exc.pipeline_flow == PIPELINE_FLOW_RESPONSE
+
+    def test_pipeline_error_minimal(self):
+        """Test PipelineError with only message."""
+        exc = PipelineError("Minimal error")
+        assert exc.server_name is None
+        assert exc.operation is None
+        assert exc.pipeline_flow is None
+
+    def test_pipeline_flow_constants(self):
+        """Test pipeline flow constants have expected values."""
+        assert PIPELINE_FLOW_REQUEST == "request"
+        assert PIPELINE_FLOW_RESPONSE == "response"
+
+    def test_pipeline_error_flows_mapping(self):
+        """Test _PIPELINE_ERROR_FLOWS mapping from header values to flow constants."""
+        assert _PIPELINE_ERROR_FLOWS["request-pipeline-failure"] == PIPELINE_FLOW_REQUEST
+        assert _PIPELINE_ERROR_FLOWS["response-pipeline-failure"] == PIPELINE_FLOW_RESPONSE
+
+    @patch("requests.Session")
+    def test_pipeline_error_on_request_failure(self, mock_session_class):
+        """Test PipelineError raised on 500 with request-pipeline-failure header."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.headers = {"Mcpd-Error-Type": "request-pipeline-failure"}
+        mock_response.text = "Request pipeline processing failed"
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.post.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(PipelineError) as exc_info:
+            client._perform_call("test_server", "test_tool", {"param": "value"})
+
+        assert exc_info.value.pipeline_flow == PIPELINE_FLOW_REQUEST
+        assert exc_info.value.server_name == "test_server"
+        assert exc_info.value.operation == "test_server.test_tool"
+        assert "Request pipeline processing failed" in str(exc_info.value)
+
+    @patch("requests.Session")
+    def test_pipeline_error_on_response_failure(self, mock_session_class):
+        """Test PipelineError raised on 500 with response-pipeline-failure header."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.headers = {"Mcpd-Error-Type": "response-pipeline-failure"}
+        mock_response.text = "Response pipeline processing failed"
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.post.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(PipelineError) as exc_info:
+            client._perform_call("test_server", "test_tool", {"param": "value"})
+
+        assert exc_info.value.pipeline_flow == PIPELINE_FLOW_RESPONSE
+        assert exc_info.value.server_name == "test_server"
+        assert exc_info.value.operation == "test_server.test_tool"
+        assert "Response pipeline processing failed" in str(exc_info.value)
+
+    @patch("requests.Session")
+    def test_500_without_header_is_tool_execution_error(self, mock_session_class):
+        """Test that 500 without Mcpd-Error-Type header raises ToolExecutionError."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.headers = {}
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.post.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            client._perform_call("test_server", "test_tool", {"param": "value"})
+
+        assert "Server error when executing 'test_tool'" in str(exc_info.value)
+
+    @patch("requests.Session")
+    def test_pipeline_error_case_insensitive_header(self, mock_session_class):
+        """Test PipelineError handles case-insensitive header values."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.headers = {"Mcpd-Error-Type": "REQUEST-PIPELINE-FAILURE"}
+        mock_response.text = "Pipeline failed"
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.post.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(PipelineError) as exc_info:
+            client._perform_call("test_server", "test_tool", {})
+
+        assert exc_info.value.pipeline_flow == PIPELINE_FLOW_REQUEST
+
+    @patch("requests.Session")
+    def test_pipeline_error_empty_body_uses_default_message(self, mock_session_class):
+        """Test PipelineError uses default message when response body is empty."""
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.headers = {"Mcpd-Error-Type": "response-pipeline-failure"}
+        mock_response.text = ""
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+        mock_session.post.return_value = mock_response
+
+        client = McpdClient(api_endpoint="http://localhost:8090")
+
+        with pytest.raises(PipelineError) as exc_info:
+            client._perform_call("test_server", "test_tool", {})
+
+        assert "Pipeline failure" in str(exc_info.value)

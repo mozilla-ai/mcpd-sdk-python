@@ -2,10 +2,23 @@ import math
 from unittest.mock import Mock, patch
 
 import pytest
+import requests
 from requests import Session
 from requests.exceptions import RequestException
 
-from mcpd import AuthenticationError, HealthStatus, McpdClient, McpdError, ServerNotFoundError, ServerUnhealthyError
+from mcpd import (
+    PIPELINE_FLOW_REQUEST,
+    PIPELINE_FLOW_RESPONSE,
+    AuthenticationError,
+    HealthStatus,
+    McpdClient,
+    McpdError,
+    PipelineError,
+    ServerNotFoundError,
+    ServerUnhealthyError,
+    ToolExecutionError,
+)
+from mcpd.mcpd_client import _raise_for_http_error
 
 
 class TestHealthStatus:
@@ -26,6 +39,158 @@ class TestHealthStatus:
         assert HealthStatus.is_transient(HealthStatus.UNKNOWN.value)
         assert not HealthStatus.is_transient(HealthStatus.OK.value)
         assert not HealthStatus.is_transient(HealthStatus.UNREACHABLE.value)
+
+
+class TestRaiseForHttpError:
+    """Unit tests for _raise_for_http_error helper function."""
+
+    @staticmethod
+    def _make_http_error(
+        status_code: int,
+        headers: dict | None = None,
+        text: str = "",
+    ) -> requests.exceptions.HTTPError:
+        """Create a mock HTTPError with the given status code and headers."""
+        response = Mock()
+        response.status_code = status_code
+        response.headers = headers or {}
+        response.text = text
+        error = requests.exceptions.HTTPError(response=response)
+        return error
+
+    def test_401_raises_authentication_error(self):
+        """Test that 401 status raises AuthenticationError."""
+        error = self._make_http_error(401)
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            _raise_for_http_error(error, "test_server", "test_tool")
+
+        assert "Authentication failed" in str(exc_info.value)
+        assert "test_tool" in str(exc_info.value)
+        assert "test_server" in str(exc_info.value)
+
+    def test_404_raises_server_not_found_error(self):
+        """Test that 404 status raises ServerNotFoundError."""
+        error = self._make_http_error(404)
+
+        with pytest.raises(ServerNotFoundError) as exc_info:
+            _raise_for_http_error(error, "missing_server", "some_tool")
+
+        assert exc_info.value.server_name == "missing_server"
+
+    def test_500_with_request_pipeline_header_raises_pipeline_error(self):
+        """Test that 500 with request-pipeline-failure header raises PipelineError."""
+        error = self._make_http_error(
+            500,
+            headers={"Mcpd-Error-Type": "request-pipeline-failure"},
+            text="Auth plugin failed",
+        )
+
+        with pytest.raises(PipelineError) as exc_info:
+            _raise_for_http_error(error, "time", "get_current_time")
+
+        assert exc_info.value.pipeline_flow == PIPELINE_FLOW_REQUEST
+        assert exc_info.value.server_name == "time"
+        assert exc_info.value.operation == "time.get_current_time"
+        assert "Auth plugin failed" in str(exc_info.value)
+
+    def test_500_with_response_pipeline_header_raises_pipeline_error(self):
+        """Test that 500 with response-pipeline-failure header raises PipelineError."""
+        error = self._make_http_error(
+            500,
+            headers={"Mcpd-Error-Type": "response-pipeline-failure"},
+            text="Audit logging failed",
+        )
+
+        with pytest.raises(PipelineError) as exc_info:
+            _raise_for_http_error(error, "fetch", "download")
+
+        assert exc_info.value.pipeline_flow == PIPELINE_FLOW_RESPONSE
+        assert exc_info.value.server_name == "fetch"
+        assert exc_info.value.operation == "fetch.download"
+
+    def test_500_without_header_raises_tool_execution_error(self):
+        """Test that 500 without pipeline header raises ToolExecutionError."""
+        error = self._make_http_error(500)
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            _raise_for_http_error(error, "broken_server", "failing_tool")
+
+        assert "Server error" in str(exc_info.value)
+        assert exc_info.value.server_name == "broken_server"
+        assert exc_info.value.tool_name == "failing_tool"
+
+    def test_502_raises_tool_execution_error(self):
+        """Test that 502 Bad Gateway raises ToolExecutionError."""
+        error = self._make_http_error(502)
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            _raise_for_http_error(error, "proxy_server", "remote_tool")
+
+        assert "Server error" in str(exc_info.value)
+
+    def test_503_raises_tool_execution_error(self):
+        """Test that 503 Service Unavailable raises ToolExecutionError."""
+        error = self._make_http_error(503)
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            _raise_for_http_error(error, "overloaded", "busy_tool")
+
+        assert "Server error" in str(exc_info.value)
+
+    def test_400_raises_tool_execution_error(self):
+        """Test that 400 Bad Request raises ToolExecutionError with generic message."""
+        error = self._make_http_error(400)
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            _raise_for_http_error(error, "api_server", "validate_tool")
+
+        assert "Error calling tool" in str(exc_info.value)
+        assert "Server error" not in str(exc_info.value)
+
+    def test_403_raises_tool_execution_error(self):
+        """Test that 403 Forbidden raises ToolExecutionError with generic message."""
+        error = self._make_http_error(403)
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            _raise_for_http_error(error, "secure_server", "protected_tool")
+
+        assert "Error calling tool" in str(exc_info.value)
+
+    def test_pipeline_header_case_insensitive(self):
+        """Test that pipeline header value is case-insensitive."""
+        error = self._make_http_error(
+            500,
+            headers={"Mcpd-Error-Type": "REQUEST-PIPELINE-FAILURE"},
+            text="Failed",
+        )
+
+        with pytest.raises(PipelineError) as exc_info:
+            _raise_for_http_error(error, "server", "tool")
+
+        assert exc_info.value.pipeline_flow == PIPELINE_FLOW_REQUEST
+
+    def test_pipeline_error_empty_body_uses_default(self):
+        """Test that empty response body uses default message."""
+        error = self._make_http_error(
+            500,
+            headers={"Mcpd-Error-Type": "response-pipeline-failure"},
+            text="",
+        )
+
+        with pytest.raises(PipelineError) as exc_info:
+            _raise_for_http_error(error, "server", "tool")
+
+        assert "Pipeline failure" in str(exc_info.value)
+
+    def test_error_chaining_preserved(self):
+        """Test that original error is chained via __cause__."""
+        error = self._make_http_error(500)
+
+        with pytest.raises(ToolExecutionError) as exc_info:
+            _raise_for_http_error(error, "server", "tool")
+
+        assert exc_info.value.__cause__ is error
 
 
 class TestMcpdClient:

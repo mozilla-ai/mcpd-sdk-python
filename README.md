@@ -280,8 +280,54 @@ client = McpdClient(
 
 ## Error Handling
 
-All SDK-level errors, including HTTP and connection errors, will raise a `McpdError` exception.
-The original exception is chained for full context.
+All SDK-level errors raise exceptions that inherit from `McpdError`. The original exception is chained via `__cause__` for full context.
+
+### Exception Types
+
+| Exception              | Description                             |
+|------------------------|-----------------------------------------|
+| `McpdError`            | Base exception for all SDK errors       |
+| `ConnectionError`      | Unable to connect to `mcpd` daemon      |
+| `AuthenticationError`  | Authentication failed (invalid API key) |
+| `ServerNotFoundError`  | Specified server doesn't exist          |
+| `ServerUnhealthyError` | Server exists but is not healthy        |
+| `ToolNotFoundError`    | Specified tool doesn't exist on server  |
+| `ToolExecutionError`   | Tool execution failed                   |
+| `ValidationError`      | Input validation failed                 |
+| `TimeoutError`         | Operation timed out                     |
+| `PipelineError`        | Required pipeline processing failed     |
+
+### Example
+
+```python
+from mcpd import (
+    McpdClient,
+    McpdError,
+    PipelineError,
+    PIPELINE_FLOW_REQUEST,
+    PIPELINE_FLOW_RESPONSE,
+    ServerNotFoundError,
+    ToolExecutionError,
+)
+
+client = McpdClient(api_endpoint="http://localhost:8090")
+
+try:
+    result = client.call.time.get_current_time()
+except PipelineError as e:
+    # A required plugin failed during request or response processing.
+    if e.pipeline_flow == PIPELINE_FLOW_RESPONSE:
+        print("Tool was called but results cannot be delivered")
+    elif e.pipeline_flow == PIPELINE_FLOW_REQUEST:
+        print("Request was rejected by pipeline")
+except ServerNotFoundError as e:
+    print(f"Server '{e.server_name}' not found")
+except ToolExecutionError as e:
+    print(f"Tool '{e.tool_name}' failed: {e}")
+except McpdError as e:
+    # Catch-all for any other SDK errors.
+    print(f"Operation failed: {e}")
+```
 
 
 ## License

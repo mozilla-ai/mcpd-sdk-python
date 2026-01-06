@@ -13,7 +13,7 @@ import threading
 from collections.abc import Callable
 from enum import Enum
 from functools import wraps
-from typing import Any, ParamSpec, Protocol, TypeVar
+from typing import Any, NoReturn, ParamSpec, Protocol, TypeVar
 
 import requests
 from cachetools import TTLCache, cached
@@ -21,9 +21,11 @@ from cachetools import TTLCache, cached
 from ._logger import Logger, create_logger
 from .dynamic_caller import DynamicCaller
 from .exceptions import (
+    _PIPELINE_ERROR_FLOWS,
     AuthenticationError,
     ConnectionError,
     McpdError,
+    PipelineError,
     ServerNotFoundError,
     ServerUnhealthyError,
     TimeoutError,
@@ -33,6 +35,54 @@ from .function_builder import TOOL_SEPARATOR, FunctionBuilder
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+# Header name for mcpd pipeline error type (internal).
+_MCPD_ERROR_TYPE_HEADER = "Mcpd-Error-Type"
+
+
+def _raise_for_http_error(
+    error: requests.exceptions.HTTPError,
+    server_name: str,
+    tool_name: str,
+) -> NoReturn:
+    """Raise appropriate McpdError for HTTP error responses."""
+    status = error.response.status_code
+
+    if status == 401:
+        raise AuthenticationError(
+            f"Authentication failed when calling '{tool_name}' on '{server_name}': {error}"
+        ) from error
+
+    if status == 404:
+        raise ServerNotFoundError(f"Server '{server_name}' not found", server_name=server_name) from error
+
+    # Check for pipeline failure (500 with Mcpd-Error-Type header).
+    if status == 500:
+        error_type = error.response.headers.get(_MCPD_ERROR_TYPE_HEADER, "").lower()
+        flow = _PIPELINE_ERROR_FLOWS.get(error_type)
+        if flow:
+            message = error.response.text or "Pipeline failure"
+            raise PipelineError(
+                message=message,
+                server_name=server_name,
+                operation=f"{server_name}.{tool_name}",
+                pipeline_flow=flow,
+            ) from error
+
+    # 5xx server errors.
+    if status >= 500:
+        raise ToolExecutionError(
+            f"Server error when executing '{tool_name}' on '{server_name}': {error}",
+            server_name=server_name,
+            tool_name=tool_name,
+        ) from error
+
+    # Other HTTP errors (4xx).
+    raise ToolExecutionError(
+        f"Error calling tool '{tool_name}' on server '{server_name}': {error}",
+        server_name=server_name,
+        tool_name=tool_name,
+    ) from error
 
 
 class _AgentFunction(Protocol):
@@ -216,24 +266,7 @@ class McpdClient:
                 "Tool execution timed out after 30 seconds", operation=f"{server_name}.{tool_name}", timeout=30
             ) from e
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401:
-                raise AuthenticationError(
-                    f"Authentication failed when calling '{tool_name}' on '{server_name}': {e}"
-                ) from e
-            elif e.response.status_code == 404:
-                raise ServerNotFoundError(f"Server '{server_name}' not found", server_name=server_name) from e
-            elif e.response.status_code >= 500:
-                raise ToolExecutionError(
-                    f"Server error when executing '{tool_name}' on '{server_name}': {e}",
-                    server_name=server_name,
-                    tool_name=tool_name,
-                ) from e
-            else:
-                raise ToolExecutionError(
-                    f"Error calling tool '{tool_name}' on server '{server_name}': {e}",
-                    server_name=server_name,
-                    tool_name=tool_name,
-                ) from e
+            _raise_for_http_error(e, server_name, tool_name)
         except requests.exceptions.RequestException as e:
             raise McpdError(f"Error calling tool '{tool_name}' on server '{server_name}': {e}") from e
 
