@@ -361,10 +361,10 @@ class PipelineError(McpdError):
     def __init__(
         self,
         message: str,
-        server_name: str = None,
-        operation: str = None,
-        pipeline_flow: str = None,
-    ):
+        server_name: str | None = None,
+        operation: str | None = None,
+        pipeline_flow: str | None = None,
+    ) -> None:
         """Initialize PipelineError.
 
         Args:
