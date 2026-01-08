@@ -58,7 +58,7 @@ def _raise_for_http_error(
 
     # Check for pipeline failure (500 with Mcpd-Error-Type header).
     if status == 500:
-        error_type = error.response.headers.get(_MCPD_ERROR_TYPE_HEADER, "").lower()
+        error_type = (error.response.headers.get(_MCPD_ERROR_TYPE_HEADER) or "").lower()
         flow = _PIPELINE_ERROR_FLOWS.get(error_type)
         if flow:
             message = error.response.text or "Pipeline failure"
