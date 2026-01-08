@@ -2,7 +2,27 @@
 
 This module provides a structured exception hierarchy to help users handle
 different error scenarios appropriately.
+
+Constants:
+    PIPELINE_FLOW_REQUEST: Flow constant indicating a request pipeline failure.
+        The request was rejected before reaching the upstream server.
+    PIPELINE_FLOW_RESPONSE: Flow constant indicating a response pipeline failure.
+        The upstream request was processed but results cannot be returned.
 """
+
+#: Flow constant for request pipeline failures.
+#: The request was rejected before reaching the upstream server.
+PIPELINE_FLOW_REQUEST: str = "request"
+
+#: Flow constant for response pipeline failures.
+#: The upstream request was processed but results cannot be returned.
+PIPELINE_FLOW_RESPONSE: str = "response"
+
+# Internal mapping from mcpd error type header values to flow constants.
+_PIPELINE_ERROR_FLOWS: dict[str, str] = {
+    "request-pipeline-failure": PIPELINE_FLOW_REQUEST,
+    "response-pipeline-failure": PIPELINE_FLOW_RESPONSE,
+}
 
 
 class McpdError(Exception):
@@ -303,3 +323,57 @@ class TimeoutError(McpdError):
         super().__init__(message)
         self.operation = operation
         self.timeout = timeout
+
+
+class PipelineError(McpdError):
+    """Raised when required pipeline processing fails.
+
+    This indicates that a required plugin failed during request or response
+    processing. This typically indicates a problem with a plugin or an external
+    system that a plugin depends on (e.g., audit service, authentication provider).
+
+    Pipeline Flow Distinction:
+    - **response-pipeline-failure**: The upstream request was processed (the tool
+      was called), but results cannot be returned due to a required response
+      processing step failure. Note: This does not indicate whether the tool
+      itself succeeded or failed - only that the response cannot be delivered.
+
+    - **request-pipeline-failure**: The request was rejected before reaching the
+      upstream server due to a required request processing step failure (such as
+      authentication, authorization, validation, or rate limiting plugin failure).
+
+    Attributes:
+        server_name: The server name (when called through tool execution).
+        operation: The operation (e.g., "time.get_current_time").
+        pipeline_flow: Which pipeline flow failed ("request" or "response").
+
+    Example:
+        >>> try:
+        >>>     result = client.call.time.get_current_time()
+        >>> except PipelineError as e:
+        >>>     print(f"Pipeline {e.pipeline_flow} failure: {e}")
+        >>>     if e.pipeline_flow == "response":
+        >>>         print("Tool was called but results cannot be delivered")
+        >>>     else:
+        >>>         print("Request was rejected by pipeline")
+    """
+
+    def __init__(
+        self,
+        message: str,
+        server_name: str | None = None,
+        operation: str | None = None,
+        pipeline_flow: str | None = None,
+    ) -> None:
+        """Initialize PipelineError.
+
+        Args:
+            message: The error message.
+            server_name: The name of the server (when called through tool execution).
+            operation: The operation (e.g., "time.get_current_time").
+            pipeline_flow: Which pipeline flow failed ("request" or "response").
+        """
+        super().__init__(message)
+        self.server_name = server_name
+        self.operation = operation
+        self.pipeline_flow = pipeline_flow

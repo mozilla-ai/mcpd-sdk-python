@@ -14,9 +14,12 @@ This package provides:
 
 from ._logger import Logger, LogLevel
 from .exceptions import (
+    PIPELINE_FLOW_REQUEST,
+    PIPELINE_FLOW_RESPONSE,
     AuthenticationError,
     ConnectionError,
     McpdError,
+    PipelineError,
     ServerNotFoundError,
     ServerUnhealthyError,
     TimeoutError,
@@ -34,6 +37,9 @@ __all__ = [
     "McpdError",
     "AuthenticationError",
     "ConnectionError",
+    "PipelineError",
+    "PIPELINE_FLOW_REQUEST",
+    "PIPELINE_FLOW_RESPONSE",
     "ServerNotFoundError",
     "ServerUnhealthyError",
     "TimeoutError",
