@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .exceptions import McpdError, ValidationError
+from .exceptions import McpdError, ToolBuildError, ValidationError
 from .type_converter import TypeConverter
 
 if TYPE_CHECKING:
@@ -170,10 +170,12 @@ class FunctionBuilder:
             - Has _tool_name attribute containing the original tool name
 
         Raises:
-            McpdError: If the function cannot be built from the schema, for example
-                      when a parameter name is unusable or the tool definition is
-                      malformed. The original exception is preserved via exception
-                      chaining.
+            ValidationError: If the tool definition does not match its contract, for
+                      example when a parameter name is unusable or a field has the
+                      wrong shape.
+            ToolBuildError: If the function cannot be built for a reason the tool
+                      definition does not account for. The original exception is
+                      preserved via exception chaining.
 
         Example:
             >>> schema = {
@@ -203,6 +205,8 @@ class FunctionBuilder:
         if cache_key in self._function_cache:
             return self._build_function(self._function_cache[cache_key])
 
+        self._validate_schema(schema)
+
         try:
             annotations = self._create_annotations(schema)
             tool = _ToolFunction(
@@ -216,11 +220,53 @@ class FunctionBuilder:
         except McpdError:
             raise
         except Exception as e:
-            raise McpdError(f"Error creating function {cache_key!r}: {e}") from e
+            raise ToolBuildError(f"Tool {cache_key!r} cannot be built") from e
 
         self._function_cache[cache_key] = tool
 
         return self._build_function(tool)
+
+    def _validate_schema(self, schema: dict[str, Any]) -> None:
+        """Check an untrusted tool definition against the shape a tool function needs.
+
+        Args:
+            schema: The tool's JSON Schema definition.
+
+        Raises:
+            ValidationError: If any part of the definition the builder reads has the
+                wrong shape.
+
+        NOTE: This covers the definition itself. A parameter's own type description is
+        checked where it is converted.
+        """
+        name = schema.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValidationError("Tool definition has no usable name")
+
+        if not isinstance(schema.get("description", ""), str):
+            raise ValidationError(f"Tool {name!r} does not describe itself as text")
+
+        input_schema = schema.get("inputSchema", {})
+        if not isinstance(input_schema, dict):
+            raise ValidationError(f"Tool {name!r} does not describe its parameters as an object")
+
+        properties = input_schema.get("properties", {})
+        if not isinstance(properties, dict):
+            raise ValidationError(f"Tool {name!r} does not list its parameters as an object")
+
+        required = input_schema.get("required", [])
+        if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+            raise ValidationError(f"Tool {name!r} does not list its required parameters as names")
+
+        for param_name, param_schema in properties.items():
+            if not isinstance(param_name, str):
+                raise ValidationError(f"Tool {name!r} has a parameter whose name is not text")
+
+            if not isinstance(param_schema, dict):
+                raise ValidationError(
+                    f"Tool parameter {param_name!r} is not described as an object",
+                    validation_errors=[param_name],
+                )
 
     def _build_signature(self, schema: dict[str, Any], annotations: dict[str, Any]) -> inspect.Signature:
         """Build the call signature that a tool's JSON Schema describes.
@@ -386,7 +432,14 @@ class FunctionBuilder:
 
         for param_name, param_info in properties.items():
             is_required = param_name in required_params
-            param_type = TypeConverter.parse_schema_type(param_info)
+
+            try:
+                param_type = TypeConverter.parse_schema_type(param_info)
+            except Exception as e:
+                raise ValidationError(
+                    f"Tool parameter {param_name!r} has an unusable type description",
+                    validation_errors=[param_name],
+                ) from e
 
             if is_required:
                 annotations[param_name] = param_type

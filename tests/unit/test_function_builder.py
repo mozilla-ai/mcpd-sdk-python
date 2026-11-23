@@ -6,7 +6,7 @@ from typing import Any, get_type_hints
 
 import pytest
 
-from mcpd.exceptions import McpdError, ValidationError
+from mcpd.exceptions import McpdError, ToolBuildError, ValidationError
 from mcpd.function_builder import FunctionBuilder
 
 
@@ -474,3 +474,32 @@ class TestFunctionBuilderMalformedSchema:
             function_builder.create_function_from_schema(schema, "server")
 
         assert "absent" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "schema",
+        [
+            pytest.param({"inputSchema": {"type": "object"}}, id="no-name"),
+            pytest.param({"name": 42}, id="name-is-not-a-string"),
+            pytest.param({"name": "t", "description": 42}, id="description-is-not-a-string"),
+            pytest.param({"name": "t", "inputSchema": "nope"}, id="input-schema-is-not-an-object"),
+            pytest.param({"name": "t", "inputSchema": {"properties": ["p"]}}, id="properties-is-not-an-object"),
+            pytest.param({"name": "t", "inputSchema": {"properties": {42: {}}}}, id="parameter-name-is-not-a-string"),
+            pytest.param({"name": "t", "inputSchema": {"properties": {"p": "nope"}}}, id="parameter-is-not-an-object"),
+            pytest.param({"name": "t", "inputSchema": {"required": 5}}, id="required-is-not-a-list"),
+            pytest.param({"name": "t", "inputSchema": {"required": [5]}}, id="required-name-is-not-a-string"),
+            pytest.param({"name": "t", "inputSchema": {"properties": {"p": {"anyOf": []}}}}, id="empty-any-of"),
+        ],
+    )
+    def test_malformed_definition_is_reported_as_a_validation_error(self, function_builder, schema):
+        with pytest.raises(ValidationError):
+            function_builder.create_function_from_schema(schema, "server")
+
+    def test_unexpected_failure_is_reported_as_a_build_error(self, function_builder, monkeypatch):
+        def defect(*args, **kwargs):
+            raise RuntimeError("the builder is broken")
+
+        monkeypatch.setattr(function_builder, "_create_docstring", defect)
+        schema = {"name": "usable", "inputSchema": {"type": "object", "properties": {}, "required": []}}
+
+        with pytest.raises(ToolBuildError):
+            function_builder.create_function_from_schema(schema, "server")
