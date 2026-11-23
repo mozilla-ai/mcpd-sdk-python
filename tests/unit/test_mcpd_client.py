@@ -17,6 +17,7 @@ from mcpd import (
     PipelineError,
     ServerNotFoundError,
     ServerUnhealthyError,
+    ToolBuildError,
     ToolExecutionError,
 )
 from mcpd.mcpd_client import _raise_for_http_error
@@ -1426,6 +1427,32 @@ class TestAgentToolsResilience:
 
         assert len(warnings) == 1
         assert "\n" not in warnings[0]
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_reports_a_build_failure_that_is_not_the_definition(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        mock_servers.return_value = ["working"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "working": [
+                    {
+                        "name": "good_tool",
+                        "description": "A usable tool",
+                        "inputSchema": {"type": "object", "properties": {}, "required": []},
+                    }
+                ]
+            }
+        )
+        mock_health.return_value = {"working": {"status": "ok"}}
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_create.side_effect = ToolBuildError("the builder is broken")
+
+            with pytest.raises(ToolBuildError):
+                client.agent_tools()
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")

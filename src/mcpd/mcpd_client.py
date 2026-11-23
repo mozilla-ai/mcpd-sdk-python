@@ -30,6 +30,7 @@ from .exceptions import (
     ServerUnhealthyError,
     TimeoutError,
     ToolExecutionError,
+    ValidationError,
 )
 from .function_builder import TOOL_SEPARATOR, FunctionBuilder
 
@@ -480,8 +481,11 @@ class McpdClient:
             ConnectionError: If unable to connect to the mcpd daemon.
             TimeoutError: If requests to the daemon time out.
             AuthenticationError: If API key authentication fails.
-            McpdError: If unable to retrieve server health status or generate functions.
-                      Servers for which tool schemas cannot be retrieved will be ignored.
+            ToolBuildError: If a tool function cannot be built for a reason its
+                      definition does not account for.
+            McpdError: If unable to retrieve server health status. Servers whose tool
+                      schemas cannot be retrieved are ignored, as is a tool definition
+                      that does not match its contract.
 
         Examples:
             >>> from any_agent import AnyAgent, AgentConfig
@@ -604,9 +608,13 @@ class McpdClient:
         Returns:
             A new callable per usable tool, in the order the servers are named.
 
+        Raises:
+            ToolBuildError: If a tool function cannot be built for a reason its
+                definition does not account for.
+
         Note:
-            A tool definition that cannot be built is skipped. When logging is enabled
-            a warning is logged for it.
+            A tool definition that does not match its contract is skipped. When logging
+            is enabled a warning is logged for it.
         """
         tools: list[_AgentFunction] = []
         for server_name in server_names:
@@ -614,10 +622,9 @@ class McpdClient:
                 tool_name = schema.get("name") if isinstance(schema, dict) else None
                 try:
                     tools.append(self._function_builder.create_function_from_schema(schema, server_name))
-                except McpdError as e:
-                    # A malformed tool definition and a defect in the builder cannot be told
-                    # apart here, so both are skipped. A narrower catch would let one bad
-                    # definition remove every tool.
+                except ValidationError as e:
+                    # One rejected definition must not remove every other tool. Any other
+                    # failure is not caused by the definition, so it is not skipped.
                     self._logger.warn("Skipping unusable tool %r on server '%s': %r", tool_name, server_name, e)
 
         return tools
