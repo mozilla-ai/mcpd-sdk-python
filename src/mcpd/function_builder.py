@@ -519,11 +519,3 @@ class FunctionBuilder:
             >>> func3 = builder.create_function_from_schema(schema, "server1")  # Rebuilds
         """
         self._function_cache.clear()
-
-    def get_cached_functions(self) -> list[Callable[..., Any]]:
-        """Get all cached functions.
-
-        Returns:
-            List of all cached agent functions, or empty list if cache is empty.
-        """
-        return [self._build_function(tool) for tool in self._function_cache.values()]

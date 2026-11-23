@@ -1,3 +1,4 @@
+import contextlib
 import math
 from unittest.mock import Mock, patch
 
@@ -352,7 +353,7 @@ class TestMcpdClient:
 
             # Cache is built from both servers, but filtered to only server1.
             assert result == [mock_func1]
-            assert mock_create.call_count == 2
+            assert mock_create.call_count == 1
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -392,7 +393,7 @@ class TestMcpdClient:
 
             # Cache is built from all 3 servers, but filtered to only server1 and server2.
             assert result == [mock_func1, mock_func2]
-            assert mock_create.call_count == 3
+            assert mock_create.call_count == 2
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -421,7 +422,7 @@ class TestMcpdClient:
 
             # Cache is built from server1, but filtered to nonexistent server.
             assert result == []
-            assert mock_create.call_count == 1
+            assert mock_create.call_count == 0
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -450,7 +451,7 @@ class TestMcpdClient:
 
             # Cache is built from all servers, but filtered to empty list.
             assert result == []
-            assert mock_create.call_count == 1
+            assert mock_create.call_count == 0
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -575,7 +576,7 @@ class TestMcpdClient:
             # Cache is built from server1 and server3 (server2 is unhealthy and skipped).
             # Filtered to only server1 and server2, but server2 not in cache.
             assert result == [mock_func1]
-            assert mock_create.call_count == 2
+            assert mock_create.call_count == 1
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -759,7 +760,7 @@ class TestMcpdClient:
             # Cache is built from all 3 servers, filtered by both servers and tools.
             assert len(result) == 2
             assert set(result) == {mock_func1, mock_func2}
-            assert mock_create.call_count == 3
+            assert mock_create.call_count == 2
 
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
@@ -857,6 +858,8 @@ class TestMcpdClient:
             # Filter by prefixed name (should work).
             result = client.agent_tools(tools=["test__my__special__tool"])
             assert len(result) == 1
+
+            # The definition is cached, but each call builds its own function from it.
             assert mock_create.call_count == 1
 
     @patch.object(McpdClient, "servers")
@@ -1285,3 +1288,272 @@ class TestLogger:
             assert len(custom_logger.warnings) == 1
             assert "Server 'server2' became unavailable or unhealthy during tool fetch" in custom_logger.warnings[0]
             assert "Connection failed" in custom_logger.warnings[0]
+
+
+class TestAgentToolsIsolation:
+    """One server's tool definitions must not affect another server's tools."""
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_does_not_build_unrequested_servers(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        mock_servers.return_value = ["plain", "dictionary"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "plain": [{"name": "tool1", "description": "Plain tool"}],
+                "dictionary": [{"name": "tool2", "description": "Other tool"}],
+            }
+        )
+        mock_health.return_value = {"plain": {"status": "ok"}, "dictionary": {"status": "ok"}}
+
+        with patch.object(client._function_builder, "create_function_from_schema") as mock_create:
+            mock_create.return_value = Mock(_server_name="plain", _tool_name="tool1")
+
+            client.agent_tools(servers=["plain"])
+
+            built_servers = {call.args[1] for call in mock_create.call_args_list}
+            assert built_servers == {"plain"}
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_skips_tool_the_builder_rejects(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        mock_servers.return_value = ["plain", "dictionary"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "plain": [
+                    {
+                        "name": "good_tool",
+                        "description": "A usable tool",
+                        "inputSchema": {"type": "object", "properties": {}, "required": []},
+                    }
+                ],
+                "dictionary": [
+                    {
+                        "name": "bad_tool",
+                        "description": "A tool with an unusable parameter name",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"not-an-identifier": {"type": "string"}},
+                            "required": [],
+                        },
+                    }
+                ],
+            }
+        )
+        mock_health.return_value = {"plain": {"status": "ok"}, "dictionary": {"status": "ok"}}
+
+        result = client.agent_tools()
+
+        assert [func._tool_name for func in result] == ["good_tool"]
+
+
+class TestAgentToolsResilience:
+    """A single unusable tool definition must not remove every other server's tools."""
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_survives_a_malformed_tool_definition(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        mock_servers.return_value = ["broken", "working"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "broken": [{"inputSchema": {"type": "object", "properties": {}, "required": []}}],
+                "working": [
+                    {
+                        "name": "good_tool",
+                        "description": "A usable tool",
+                        "inputSchema": {"type": "object", "properties": {}, "required": []},
+                    }
+                ],
+            }
+        )
+        mock_health.return_value = {"broken": {"status": "ok"}, "working": {"status": "ok"}}
+
+        result = client.agent_tools()
+
+        assert [func._tool_name for func in result] == ["good_tool"]
+
+    @pytest.mark.parametrize(
+        "input_schema",
+        [
+            pytest.param({"type": "object", "properties": {"not-an-identifier": {"type": "string"}}}, id="bad-name"),
+            pytest.param({"type": "object", "properties": {"param": "not an object"}}, id="bad-property"),
+            pytest.param({"type": "object", "properties": ["param"]}, id="bad-properties"),
+        ],
+    )
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_skipped_tool_name_cannot_forge_a_log_line(self, mock_health, mock_tools, mock_servers, input_schema):
+        warnings: list[str] = []
+
+        class RecordingLogger:
+            def trace(self, msg: str, *args: object) -> None:
+                pass
+
+            def debug(self, msg: str, *args: object) -> None:
+                pass
+
+            def info(self, msg: str, *args: object) -> None:
+                pass
+
+            def warn(self, msg: str, *args: object) -> None:
+                warnings.append(msg % args)
+
+            def error(self, msg: str, *args: object) -> None:
+                pass
+
+        client = McpdClient(api_endpoint="http://localhost:8090", logger=RecordingLogger())
+        hostile_name = "innocent\nWARNING: server 'prod' authenticated as admin"
+        mock_servers.return_value = ["hostile"]
+        mock_tools.return_value = [
+            {
+                "name": hostile_name,
+                "description": "A tool whose name spans two lines",
+                "inputSchema": input_schema,
+            }
+        ]
+        mock_health.return_value = {"hostile": {"status": "ok"}}
+
+        client.agent_tools()
+
+        assert len(warnings) == 1
+        assert "\n" not in warnings[0]
+
+    @patch.object(McpdClient, "servers")
+    @patch.object(McpdClient, "tools")
+    @patch.object(McpdClient, "server_health")
+    def test_agent_tools_returns_cached_functions_when_the_daemon_stops_responding(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        mock_servers.return_value = ["time"]
+        mock_tools.side_effect = tools_side_effect(
+            {
+                "time": [
+                    {
+                        "name": "get_current_time",
+                        "description": "Get the time",
+                        "inputSchema": {"type": "object", "properties": {}, "required": []},
+                    }
+                ]
+            }
+        )
+        mock_health.return_value = {"time": {"status": "ok"}}
+
+        first_result = client.agent_tools()
+
+        mock_servers.side_effect = ConnectionError("daemon is gone")
+
+        second_result = client.agent_tools()
+
+        assert [func._tool_name for func in second_result] == [func._tool_name for func in first_result]
+
+
+class TestAgentToolsCacheCoherence:
+    """Repeated calls must agree with each other and with the daemon's health reports."""
+
+    @pytest.fixture
+    def health(self):
+        return {}
+
+    @pytest.fixture
+    def client_against(self, health):
+        def build(tools_by_server):
+            client = McpdClient(api_endpoint="http://localhost:8090")
+            return client, [
+                patch.object(McpdClient, "servers", return_value=list(tools_by_server)),
+                patch.object(McpdClient, "server_health", side_effect=lambda: health),
+                patch.object(
+                    McpdClient, "tools", side_effect=lambda server_name=None: tools_by_server.get(server_name, [])
+                ),
+            ]
+
+        return build
+
+    @staticmethod
+    def _schema(name):
+        return {"name": name, "description": "d", "inputSchema": {"type": "object", "properties": {}, "required": []}}
+
+    def test_a_server_that_becomes_healthy_is_picked_up(self, health, client_against):
+        client, patches = client_against({"a": [self._schema("t_a")]})
+        health.update({"a": {"status": "unreachable"}})
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+
+            assert client.agent_tools() == []
+
+            health["a"] = {"status": "ok"}
+
+            assert [func._tool_name for func in client.agent_tools()] == ["t_a"]
+
+    def test_repeating_a_filtered_call_gives_the_same_answer(self, health, client_against):
+        client, patches = client_against({"a": [self._schema("t_a")], "b": [self._schema("t_b")]})
+        health.update({"a": {"status": "ok"}, "b": {"status": "ok"}})
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+
+            client.agent_tools(servers=["a"])
+            health["a"] = {"status": "unreachable"}
+
+            first = [func._tool_name for func in client.agent_tools(servers=["a", "b"])]
+            second = [func._tool_name for func in client.agent_tools(servers=["a", "b"])]
+
+        assert first == second
+
+    def test_unfiltered_call_is_not_a_subset_of_a_filtered_one(self, health, client_against):
+        client, patches = client_against({"a": [self._schema("t_a")], "c": [self._schema("t_c")]})
+        health.update({"a": {"status": "ok"}, "c": {"status": "unreachable"}})
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+
+            client.agent_tools()
+            health["c"] = {"status": "ok"}
+            client.agent_tools(servers=["c"])
+
+            assert sorted(func._tool_name for func in client.agent_tools()) == ["t_a", "t_c"]
+
+    def test_a_repeated_server_name_does_not_duplicate_its_tools(self, health, client_against):
+        client, patches = client_against({"a": [self._schema("t_a")]})
+        health.update({"a": {"status": "ok"}})
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+
+            first = [func._tool_name for func in client.agent_tools(servers=["a", "a"])]
+            second = [func._tool_name for func in client.agent_tools(servers=["a", "a"])]
+
+        assert first == second == ["t_a"]
+
+    def test_a_tool_entry_that_is_not_an_object_is_skipped(self, health, client_against):
+        client, patches = client_against({"a": ["not an object", self._schema("t_a")]})
+        health.update({"a": {"status": "ok"}})
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+
+            assert [func._tool_name for func in client.agent_tools()] == ["t_a"]
+
+    def test_each_call_returns_its_own_function_objects(self, health, client_against):
+        client, patches = client_against({"a": [self._schema("t_a")]})
+        health.update({"a": {"status": "ok"}})
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+
+            assert client.agent_tools()[0] is not client.agent_tools()[0]
