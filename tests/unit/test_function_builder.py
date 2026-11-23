@@ -1,8 +1,12 @@
+import contextlib
+import inspect
+from pathlib import Path
 from types import FunctionType
+from typing import Any, get_type_hints
 
 import pytest
 
-from mcpd.exceptions import McpdError
+from mcpd.exceptions import McpdError, ValidationError
 from mcpd.function_builder import FunctionBuilder
 
 
@@ -198,55 +202,28 @@ class TestFunctionBuilder:
         assert "Args:" not in docstring
         assert "Returns:" in docstring
 
-    def test_create_namespace(self, function_builder):
-        namespace = function_builder._create_namespace()
-
-        assert "McpdError" in namespace
-        assert "client" in namespace
-        assert namespace["client"] is function_builder._client
-        assert "Any" in namespace
-        assert "str" in namespace
-        assert "int" in namespace
-
     def test_clear_cache(self, function_builder):
-        # Add something to cache
-        function_builder._function_cache["test"] = {"data": "test"}
+        schema = {
+            "name": "cached_tool",
+            "description": "A tool to populate the cache.",
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
+        }
+        function_builder.create_function_from_schema(schema, "server")
+        assert len(function_builder._function_cache) == 1
 
         function_builder.clear_cache()
 
         assert len(function_builder._function_cache) == 0
 
-    def test_build_function_code_structure(self, function_builder):
+    def test_tool_name_that_is_not_an_identifier_becomes_a_safe_function_name(self, function_builder):
         schema = {
-            "name": "test_tool",
-            "description": "Test tool",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "param1": {"type": "string", "description": "Required parameter"},
-                    "param2": {"type": "string", "description": "Optional parameter"},
-                },
-                "required": ["param1"],
-            },
-        }
-
-        code = function_builder._build_function_code(schema, "test_server")
-
-        assert "def test_server__test_tool(param1, param2=None):" in code
-        assert "required_params = ['param1']" in code
-        assert 'client._perform_call("test_server", "test_tool", params)' in code
-        assert "Test tool" in code
-
-    def test_create_function_compilation_error(self, function_builder):
-        # Create a schema that would cause compilation issues
-        schema = {
-            "name": "test-tool",  # This should be sanitized
+            "name": "test-tool",
             "description": "Test tool",
             "inputSchema": {"type": "object", "properties": {}, "required": []},
         }
 
-        # Should not raise an error due to name sanitization
         func = function_builder.create_function_from_schema(schema, "test-server")
+
         assert func.__name__ == "test_server__test_tool"
 
     def test_function_has_server_name_attribute(self, function_builder):
@@ -278,3 +255,222 @@ class TestFunctionBuilder:
         # But metadata should have original names.
         assert func._server_name == "test-server"
         assert func._tool_name == "test-tool.v2"
+
+
+def _canary_payload(canary_path: Path) -> str:
+    """Build a Python expression that writes to `canary_path` when evaluated."""
+    return f"__import__('pathlib').Path({str(canary_path)!r}).write_text('executed')"
+
+
+class TestFunctionBuilderInjection:
+    """Tool definitions are untrusted input and must never reach an evaluator."""
+
+    @pytest.fixture
+    def function_builder(self, mock_client):
+        return FunctionBuilder(mock_client)
+
+    @pytest.fixture
+    def canary(self, tmp_path):
+        return tmp_path / "canary"
+
+    def test_injected_property_name_does_not_execute(self, function_builder, canary):
+        schema = {
+            "name": "lookup_word",
+            "description": "Look up a word.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "word": {"type": "string", "description": "The word"},
+                    f"lang={_canary_payload(canary)},_": {"type": "string", "description": "Language"},
+                },
+                "required": ["word"],
+            },
+        }
+
+        with contextlib.suppress(McpdError):
+            function_builder.create_function_from_schema(schema, "dictionary")
+
+        assert not canary.exists()
+
+    def test_property_name_that_is_not_an_identifier_is_rejected(self, function_builder):
+        schema = {
+            "name": "lookup_word",
+            "description": "Look up a word.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"not-an-identifier": {"type": "string", "description": "Bad"}},
+                "required": [],
+            },
+        }
+
+        with pytest.raises(McpdError):
+            function_builder.create_function_from_schema(schema, "dictionary")
+
+    def test_property_name_that_is_a_keyword_is_rejected(self, function_builder):
+        schema = {
+            "name": "lookup_word",
+            "description": "Look up a word.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"class": {"type": "string", "description": "Reserved"}},
+                "required": [],
+            },
+        }
+
+        with pytest.raises(McpdError):
+            function_builder.create_function_from_schema(schema, "dictionary")
+
+    def test_rejected_parameter_name_is_escaped_in_the_error(self, function_builder):
+        schema = {
+            "name": "lookup_word",
+            "description": "Look up a word.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"bad\nWARNING: forged log line": {"type": "string"}},
+                "required": [],
+            },
+        }
+
+        with pytest.raises(McpdError) as exc_info:
+            function_builder.create_function_from_schema(schema, "dictionary")
+
+        assert "\n" not in str(exc_info.value)
+
+    def test_injected_description_does_not_execute_when_called(self, function_builder, canary):
+        schema = {
+            "name": "lookup_word",
+            "description": f'Look up a word."""; {_canary_payload(canary)}; """',
+            "inputSchema": {
+                "type": "object",
+                "properties": {"word": {"type": "string", "description": "The word"}},
+                "required": ["word"],
+            },
+        }
+
+        func = function_builder.create_function_from_schema(schema, "dictionary")
+        func(word="apple")
+
+        assert not canary.exists()
+
+    def test_injected_tool_name_does_not_execute_when_called(self, function_builder, canary):
+        schema = {
+            "name": f'x", params) and {_canary_payload(canary)} and client._perform_call("s", "x',
+            "description": "Look up a word.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"word": {"type": "string", "description": "The word"}},
+                "required": ["word"],
+            },
+        }
+
+        func = function_builder.create_function_from_schema(schema, "dictionary")
+        func(word="apple")
+
+        assert not canary.exists()
+
+    def test_injected_parameter_description_does_not_execute_when_called(self, function_builder, canary):
+        schema = {
+            "name": "lookup_word",
+            "description": "Look up a word.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "word": {
+                        "type": "string",
+                        "description": f'The word."""; {_canary_payload(canary)}; """',
+                    }
+                },
+                "required": ["word"],
+            },
+        }
+
+        func = function_builder.create_function_from_schema(schema, "dictionary")
+        func(word="apple")
+
+        assert not canary.exists()
+
+
+class TestFunctionBuilderIntrospectionContract:
+    """Agent frameworks read these attributes to build the tool schema sent to the model."""
+
+    @pytest.fixture
+    def function_builder(self, mock_client):
+        return FunctionBuilder(mock_client)
+
+    @pytest.fixture
+    def func(self, function_builder):
+        schema = {
+            "name": "get_current_time",
+            "description": "Get the current time in a timezone.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "timezone": {"type": "string", "description": "IANA timezone name"},
+                    "format": {"type": "string", "description": "Output format"},
+                },
+                "required": ["timezone"],
+            },
+        }
+        return function_builder.create_function_from_schema(schema, "time")
+
+    def test_signature_reports_schema_parameters(self, func):
+        assert str(inspect.signature(func)) == "(timezone: str, format: str | None = None) -> Any"
+
+    def test_name_qualifies_server_and_tool(self, func):
+        assert func.__name__ == "time__get_current_time"
+
+    def test_docstring_starts_with_tool_description(self, func):
+        assert func.__doc__.startswith("Get the current time in a timezone.")
+
+    def test_annotations_are_resolved_types_not_strings(self, func):
+        # NOTE: The builder's module enables PEP 563, which turns source annotations into strings.
+        assert get_type_hints(func) == {"timezone": str, "format": str | None, "return": Any}
+
+    def test_source_is_retrievable(self, func):
+        # A framework that reads a tool's source needs a real source file.
+        assert inspect.getsource(func).strip().startswith("def ")
+
+    def test_code_object_does_not_describe_the_parameters(self, func):
+        # The signature is attached rather than compiled, so a framework must read
+        # it with inspect rather than from the code object.
+        assert func.__code__.co_argcount == 0
+        assert list(inspect.signature(func).parameters) == ["timezone", "format"]
+
+
+class TestFunctionBuilderMalformedSchema:
+    """A tool definition that does not match its contract is rejected as an McpdError."""
+
+    @pytest.fixture
+    def function_builder(self, mock_client):
+        return FunctionBuilder(mock_client)
+
+    def test_schema_without_a_name_is_rejected(self, function_builder):
+        schema = {"inputSchema": {"type": "object", "properties": {}, "required": []}}
+
+        with pytest.raises(McpdError):
+            function_builder.create_function_from_schema(schema, "server")
+
+    def test_property_that_is_not_an_object_is_rejected(self, function_builder):
+        schema = {
+            "name": "broken",
+            "inputSchema": {"type": "object", "properties": {"param": "not an object"}, "required": []},
+        }
+
+        with pytest.raises(McpdError):
+            function_builder.create_function_from_schema(schema, "server")
+
+    def test_required_name_absent_from_properties_is_rejected(self, function_builder):
+        schema = {
+            "name": "ghost_param",
+            "description": "Requires a parameter it never describes",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"present": {"type": "string"}},
+                "required": ["present", "absent"],
+            },
+        }
+
+        with pytest.raises(ValidationError) as exc_info:
+            function_builder.create_function_from_schema(schema, "server")
+
+        assert "absent" in str(exc_info.value)

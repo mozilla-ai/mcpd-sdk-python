@@ -862,50 +862,23 @@ class TestMcpdClient:
     @patch.object(McpdClient, "servers")
     @patch.object(McpdClient, "tools")
     @patch.object(McpdClient, "server_health")
-    def test_agent_tools_cache_hit_skips_discovery(self, mock_health, mock_tools, mock_servers, client):
-        """Test that cache hit returns cached functions without calling discovery methods."""
-        # Create mock functions with required metadata.
-        mock_func1 = Mock()
-        mock_func1.__name__ = "time__get_current_time"
-        mock_func1._server_name = "time"
-        mock_func1._tool_name = "get_current_time"
+    def test_agent_tools_cache_hit_skips_discovery(
+        self, mock_health, mock_tools, mock_servers, client, tools_side_effect
+    ):
+        """Test that a second call reuses built functions without re-fetching tool definitions."""
+        mock_servers.return_value = ["time"]
+        mock_tools.side_effect = tools_side_effect(
+            {"time": [{"name": "get_current_time", "description": "Get the time"}]}
+        )
+        mock_health.return_value = {"time": {"status": "ok"}}
 
-        mock_func2 = Mock()
-        mock_func2.__name__ = "math__add"
-        mock_func2._server_name = "math"
-        mock_func2._tool_name = "add"
+        first_result = client.agent_tools()
+        daemon_calls = (mock_servers.call_count, mock_tools.call_count, mock_health.call_count)
 
-        # Create factory functions for the cache.
-        def create_time_func(annotations):
-            return mock_func1
+        second_result = client.agent_tools()
 
-        def create_math_func(annotations):
-            return mock_func2
-
-        # Pre-populate the cache.
-        client._function_builder._function_cache["time__get_current_time"] = {
-            "compiled_code": None,
-            "annotations": {},
-            "create_function": create_time_func,
-        }
-        client._function_builder._function_cache["math__add"] = {
-            "compiled_code": None,
-            "annotations": {},
-            "create_function": create_math_func,
-        }
-
-        # Call agent_tools - should return cached functions without calling discovery methods.
-        result = client.agent_tools()
-
-        # Should return cached functions.
-        assert len(result) == 2
-        assert mock_func1 in result
-        assert mock_func2 in result
-
-        # Should NOT call any discovery methods.
-        mock_servers.assert_not_called()
-        mock_tools.assert_not_called()
-        mock_health.assert_not_called()
+        assert [func._tool_name for func in second_result] == [func._tool_name for func in first_result]
+        assert (mock_servers.call_count, mock_tools.call_count, mock_health.call_count) == daemon_calls
 
     @patch.object(McpdClient, "tools")
     def test_has_tool_exists(self, mock_tools, client):

@@ -1,17 +1,20 @@
 """Function generation from MCP tool schemas.
 
-This module provides the FunctionBuilder class that dynamically generates
-callable Python functions from MCP tool JSON Schema definitions. These
-functions can be used with AI agent frameworks and include proper parameter
-validation, type annotations, and comprehensive docstrings.
+This module provides the FunctionBuilder class that generates callable Python
+functions from MCP tool JSON Schema definitions. These functions can be used
+with AI agent frameworks and include proper parameter validation, type
+annotations, and comprehensive docstrings.
 
-The generated functions are self-contained and cached for performance.
+The generated functions are cached for performance.
 """
 
 from __future__ import annotations
 
+import inspect
+import keyword
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .exceptions import McpdError, ValidationError
@@ -28,20 +31,35 @@ Example: "time__get_current_time" where "time" is server and "get_current_time" 
 """
 
 
+@dataclass(frozen=True)
+class _ToolFunction:
+    """The parts of a generated tool function that do not depend on the call."""
+
+    server_name: str
+    tool_name: str
+    function_name: str
+    signature: inspect.Signature
+    annotations: dict[str, Any]
+    docstring: str
+
+
 class FunctionBuilder:
     """Builds callable Python functions from MCP tool JSON schemas.
 
-    This class generates self-contained functions that can be used with AI agent
-    frameworks. It uses dynamic string compilation to create functions with proper
-    parameter validation, type annotations, and docstrings based on the tool's
+    This class generates functions that can be used with AI agent frameworks, with
+    parameter validation, type annotations, and docstrings taken from the tool's
     JSON Schema definition.
 
-    The generated functions are cached for performance, with cache invalidation
-    controlled by the owning McpdClient via clear_cache().
+    NOTE: A tool's name, description and parameter names are server-supplied and
+    therefore untrusted. They must never reach an evaluator.
+
+    A tool's schema is read once and the result cached, so each request for that
+    tool returns a new callable without re-reading the schema. Call clear_cache()
+    to discard the cache.
 
     Attributes:
         _client: Reference to the McpdClient instance for tool execution.
-        _function_cache: Cache of compiled function templates and metadata.
+        _function_cache: What each tool's schema describes, keyed by server and tool.
 
     Example:
         This class is typically used internally by McpdClient.agent_tools():
@@ -61,7 +79,7 @@ class FunctionBuilder:
                    the generated functions via _perform_call().
         """
         self._client = client
-        self._function_cache = {}
+        self._function_cache: dict[str, _ToolFunction] = {}
 
     def _safe_name(self, name: str) -> str:
         """Convert a string into a safe Python identifier.
@@ -126,14 +144,12 @@ class FunctionBuilder:
     def create_function_from_schema(self, schema: dict[str, Any], server_name: str) -> Callable[..., Any]:
         """Create a callable Python function from an MCP tool's JSON Schema definition.
 
-        This method generates a self-contained, callable function that validates parameters
-        and executes the corresponding MCP tool. The function is dynamically compiled from
-        a string template and includes proper type annotations, docstrings, and validation
-        logic based on the tool's JSON Schema.
+        This method generates a callable function that validates parameters and executes
+        the corresponding MCP tool, with type annotations, a docstring, and validation
+        logic taken from the tool's JSON Schema.
 
-        Generated functions are cached for performance. If a function for the same
-        server/tool combination already exists in the cache, it returns a new instance
-        of the cached function template rather than recompiling.
+        What the schema describes is cached per server and tool. A repeat request for
+        the same tool returns a new callable built from that cached description.
 
         Args:
             schema: The MCP tool's JSON Schema definition, containing:
@@ -154,9 +170,10 @@ class FunctionBuilder:
             - Has _tool_name attribute containing the original tool name
 
         Raises:
-            McpdError: If function compilation fails due to invalid schema,
-                      malformed tool definition, or code generation errors.
-                      The original exception is preserved via exception chaining.
+            McpdError: If the function cannot be built from the schema, for example
+                      when a parameter name is unusable or the tool definition is
+                      malformed. The original exception is preserved via exception
+                      chaining.
 
         Example:
             >>> schema = {
@@ -178,187 +195,134 @@ class FunctionBuilder:
             parameters at runtime and builds a parameters dictionary for the API call.
             The function is cached using a key of "{server_name}{TOOL_SEPARATOR}{tool_name}".
         """
+        if not isinstance(schema, dict):
+            raise ValidationError("Tool definition is not an object")
+
         cache_key = f"{server_name}{TOOL_SEPARATOR}{schema.get('name', '')}"
 
         if cache_key in self._function_cache:
-            cached_func = self._function_cache[cache_key]
-            return cached_func["create_function"](cached_func["annotations"])
+            return self._build_function(self._function_cache[cache_key])
 
         try:
-            function_code = self._build_function_code(schema, server_name)
             annotations = self._create_annotations(schema)
-            compiled_code = compile(function_code, f"<{cache_key}>", "exec")
-
-            # Execute and get the function
-            namespace = self._create_namespace()
-            exec(compiled_code, namespace)
-            function_name = self._function_name(server_name, schema["name"])
-            created_function = namespace[function_name]
-            created_function.__annotations__ = annotations
-
-            # Add metadata attributes.
-            created_function._server_name = server_name
-            created_function._tool_name = schema["name"]
-
-            # Cache the function creation details
-            def create_function_instance(annotations: dict[str, Any]) -> Callable[..., Any]:
-                temp_namespace = namespace.copy()
-                exec(compiled_code, temp_namespace)
-                new_func = temp_namespace[function_name]
-                new_func.__annotations__ = annotations.copy()
-                # Add metadata attributes to cached instances as well.
-                new_func._server_name = server_name
-                new_func._tool_name = schema["name"]
-                return new_func
-
-            self._function_cache[cache_key] = {
-                "compiled_code": compiled_code,
-                "annotations": annotations,
-                "create_function": create_function_instance,
-            }
-
-            return created_function
-
+            tool = _ToolFunction(
+                server_name=server_name,
+                tool_name=schema["name"],
+                function_name=self._function_name(server_name, schema["name"]),
+                signature=self._build_signature(schema, annotations),
+                annotations=annotations,
+                docstring=self._create_docstring(schema),
+            )
+        except McpdError:
+            raise
         except Exception as e:
-            raise McpdError(f"Error creating function {cache_key}: {e}") from e
+            raise McpdError(f"Error creating function {cache_key!r}: {e}") from e
 
-    def _build_function_code(self, schema: dict[str, Any], server_name: str) -> str:
-        """Generate Python function source code from an MCP tool's JSON Schema.
+        self._function_cache[cache_key] = tool
 
-        This method is the core of the dynamic function generation system. It creates
-        a complete Python function as a string that includes parameter validation,
-        proper signature ordering, docstring generation, and API call execution.
+        return self._build_function(tool)
 
-        The generated function includes:
-        - Required parameters first, then optional parameters with None defaults
-        - Runtime validation that raises ValidationError for missing required params
-        - Parameter dictionary building that excludes None values
-        - Direct call to client._perform_call() with the tool's server and name
+    def _build_signature(self, schema: dict[str, Any], annotations: dict[str, Any]) -> inspect.Signature:
+        """Build the call signature that a tool's JSON Schema describes.
+
+        Required parameters precede optional ones, so the result is a usable
+        signature even when the schema lists them in another order.
 
         Args:
-            schema: The MCP tool's JSON Schema definition containing:
-                   - 'name': Tool identifier (required)
-                   - 'description': Tool description (optional)
-                   - 'inputSchema': Parameter schema with 'properties' and 'required' (optional)
-            server_name: The name of the MCP server hosting this tool.
+            schema: The tool's JSON Schema definition.
+            annotations: Parameter type annotations keyed by parameter name.
 
         Returns:
-            Complete Python function source code as a string, ready for compilation
-            with compile() and execution with exec(). The function will be named
-            using the _function_name() convention.
+            The signature for the tool's generated function.
 
-        Example:
-            Given a schema like:
-            ```python
-            {
-                "name": "get_time",
-                "description": "Get current time",
-                "inputSchema": {
-                    "properties": {"timezone": {"type": "string"}},
-                    "required": ["timezone"]
-                }
-            }
-            ```
-
-            This method generates code equivalent to:
-            ```python
-            def server__get_time(timezone):
-                '''Get current time
-
-                Args:
-                    timezone: No description provided
-
-                Returns:
-                    Any: Function execution result
-
-                Raises:
-                    ValidationError: If required parameters are missing
-                    McpdError: If the API call fails
-                '''
-                # Validate required parameters
-                required_params = ['timezone']
-                missing_params = []
-                locals_dict = locals()
-
-                for param in required_params:
-                    if param not in locals_dict or locals_dict[param] is None:
-                        missing_params.append(param)
-
-                if missing_params:
-                    raise ValidationError(
-                        f"Missing required parameters: {missing_params}",
-                        validation_errors=missing_params,
-                    )
-
-                # Build parameters dictionary
-                params = {}
-                locals_dict = locals()
-
-                for param_name in ['timezone']:
-                    if param_name in locals_dict and locals_dict[param_name] is not None:
-                        params[param_name] = locals_dict[param_name]
-
-                # Make the API call
-                return client._perform_call("server", "get_time", params)
-            ```
-
-        Note:
-            The generated code uses string interpolation and list literals to embed
-            the schema data directly into the function code. This creates a completely
-            self-contained function that doesn't depend on the original schema object.
-        """  # noqa: D214
-        function_name = self._function_name(server_name, schema["name"])
+        Raises:
+            ValidationError: If a property name cannot be used as a parameter name,
+                or if a required parameter has no property describing it.
+        """
         input_schema = schema.get("inputSchema", {})
         properties = input_schema.get("properties", {})
         required_params = set(input_schema.get("required", []))
 
-        # Sort parameters: required first, then optional
-        required_param_names = [p for p in properties if p in required_params]
-        optional_param_names = [p for p in properties if p not in required_params]
-        sorted_param_names = required_param_names + optional_param_names
-        param_declarations = []
+        undescribed_params = sorted(required_params - set(properties))
+        if undescribed_params:
+            raise ValidationError(
+                f"Tool requires parameters it does not describe: {undescribed_params}",
+                validation_errors=undescribed_params,
+            )
 
-        # Build parameter signature
-        for param_name in sorted_param_names:
-            if param_name in required_params:
-                param_declarations.append(param_name)
-            else:
-                param_declarations.append(f"{param_name}=None")
+        ordered_names = [name for name in properties if name in required_params]
+        ordered_names += [name for name in properties if name not in required_params]
 
-        param_signature = ", ".join(param_declarations)
-        docstring = self._create_docstring(schema)
+        parameters = []
+        for param_name in ordered_names:
+            if not param_name.isidentifier() or keyword.iskeyword(param_name):
+                raise ValidationError(
+                    f"Tool parameter {param_name!r} cannot be used as a parameter name",
+                    validation_errors=[param_name],
+                )
 
-        function_lines = [
-            f"def {function_name}({param_signature}):",
-            f'    """{docstring}"""',
-            "",
-            "    # Validate required parameters",
-            f"    required_params = {list(required_params)}",
-            "    missing_params = []",
-            "    locals_dict = locals()",
-            "",
-            "    for param in required_params:",
-            "        if param not in locals_dict or locals_dict[param] is None:",
-            "            missing_params.append(param)",
-            "",
-            "    if missing_params:",
-            "        raise ValidationError(",
-            '            f"Missing required parameters: {missing_params}",',
-            "            validation_errors=missing_params,",
-            "        )",
-            "",
-            "    # Build parameters dictionary",
-            "    params = {}",
-            "",
-            f"    for param_name in {list(properties.keys())}:",
-            "        if param_name in locals_dict and locals_dict[param_name] is not None:",
-            "            params[param_name] = locals_dict[param_name]",
-            "",
-            "    # Make the API call",
-            f'    return client._perform_call("{server_name}", "{schema["name"]}", params)',
-        ]
+            is_required = param_name in required_params
+            parameters.append(
+                inspect.Parameter(
+                    param_name,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    default=inspect.Parameter.empty if is_required else None,
+                    annotation=annotations[param_name],
+                )
+            )
 
-        return "\n".join(function_lines)
+        return inspect.Signature(parameters, return_annotation=Any)
+
+    def _build_function(self, tool: _ToolFunction) -> Callable[..., Any]:
+        """Create a callable that validates its arguments and executes the tool.
+
+        Args:
+            tool: The generated function's identity, signature and documentation.
+
+        Returns:
+            A callable reporting `tool`'s signature, annotations and docstring
+            under introspection.
+
+        NOTE: The tool's name, description and parameter names are server-supplied
+        data. They are attached to the callable as values and must never be
+        rendered into executable source.
+
+        NOTE: The returned callable accepts `*args, **kwargs`, so its code object
+        does not describe the tool's parameters. A caller that reads
+        `__code__.co_varnames` or `co_argcount` rather than `inspect.signature`
+        should not be given this callable.
+        """
+        client = self._client
+
+        def tool_function(*args: Any, **kwargs: Any) -> Any:
+            bound = tool.signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+
+            missing_params = [
+                name
+                for name, param in tool.signature.parameters.items()
+                if param.default is inspect.Parameter.empty and bound.arguments.get(name) is None
+            ]
+
+            if missing_params:
+                raise ValidationError(
+                    f"Missing required parameters: {missing_params}",
+                    validation_errors=missing_params,
+                )
+
+            params = {name: value for name, value in bound.arguments.items() if value is not None}
+
+            return client._perform_call(tool.server_name, tool.tool_name, params)
+
+        tool_function.__name__ = tool.function_name
+        tool_function.__qualname__ = tool.function_name
+        tool_function.__doc__ = tool.docstring
+        tool_function.__signature__ = tool.signature
+        tool_function.__annotations__ = dict(tool.annotations)
+        tool_function._server_name = tool.server_name
+        tool_function._tool_name = tool.tool_name
+
+        return tool_function
 
     def _create_annotations(self, schema: dict[str, Any]) -> dict[str, Any]:
         """Generate Python type annotations from a tool's JSON Schema.
@@ -527,74 +491,13 @@ class FunctionBuilder:
 
         return "\n".join(docstring_parts)
 
-    def _create_namespace(self) -> dict[str, Any]:
-        """Create the execution namespace for dynamically generated functions.
-
-        This method builds a dictionary containing all the Python built-ins, types,
-        and references that the generated function code needs at runtime. The namespace
-        is used as the global scope when executing the compiled function code via exec().
-
-        The namespace includes:
-        - Exception classes for error handling (McpdError, ValidationError)
-        - Reference to the client instance for making API calls
-        - Python built-in types (str, int, float, bool, list, dict)
-        - Type annotation utilities (Any, Literal, Union, NoneType)
-
-        This ensures the generated function has access to everything it needs without
-        relying on module imports or the surrounding scope.
-
-        Returns:
-            A dictionary mapping names to Python objects, suitable for use as the
-            globals parameter in exec(). This namespace makes the generated function
-            completely self-contained.
-
-        Example:
-            The namespace allows generated code like this to work:
-            ```python
-            def server__tool(param: str = None):
-                # Uses ValidationError from namespace
-                if missing_params:
-                    raise ValidationError(...)
-
-                # Uses 'client' from namespace
-                return client._perform_call(...)
-            ```
-
-            Without the namespace, the function would fail with NameError
-            when trying to access ValidationError or client.
-
-        Note:
-            - The client reference is captured at FunctionBuilder creation time
-            - All standard Python types are included to support type annotations
-            - NoneType is imported locally to avoid top-level import issues
-            - The namespace is copied for each function instance to ensure isolation
-        """
-        from types import NoneType
-        from typing import Any, Literal, Union
-
-        return {
-            "McpdError": McpdError,
-            "ValidationError": ValidationError,
-            "client": self._client,
-            "Any": Any,
-            "str": str,
-            "int": int,
-            "float": float,
-            "bool": bool,
-            "list": list,
-            "dict": dict,
-            "Literal": Literal,
-            "Union": Union,
-            "NoneType": NoneType,
-        }
-
     def clear_cache(self) -> None:
-        """Clear the internal function compilation cache.
+        """Clear the internal function cache.
 
-        This method removes all cached function templates created by previous calls
-        to create_function_from_schema(). After clearing, subsequent calls to
-        create_function_from_schema() will recompile functions from their JSON
-        schemas rather than using cached templates.
+        This method removes all cached functions created by previous calls to
+        create_function_from_schema(). After clearing, subsequent calls to
+        create_function_from_schema() will rebuild functions from their JSON
+        schemas rather than using the cache.
 
         Use this method when:
         - MCP server tool definitions have changed
@@ -609,11 +512,11 @@ class FunctionBuilder:
 
         Example:
             >>> builder = FunctionBuilder(client)
-            >>> func1 = builder.create_function_from_schema(schema, "server1")  # Compiles and caches
+            >>> func1 = builder.create_function_from_schema(schema, "server1")  # Builds and caches
             >>> func2 = builder.create_function_from_schema(schema, "server1")  # Uses cache
             >>>
             >>> builder.clear_cache()
-            >>> func3 = builder.create_function_from_schema(schema, "server1")  # Recompiles
+            >>> func3 = builder.create_function_from_schema(schema, "server1")  # Rebuilds
         """
         self._function_cache.clear()
 
@@ -623,4 +526,4 @@ class FunctionBuilder:
         Returns:
             List of all cached agent functions, or empty list if cache is empty.
         """
-        return [cached["create_function"](cached["annotations"]) for cached in self._function_cache.values()]
+        return [self._build_function(tool) for tool in self._function_cache.values()]
