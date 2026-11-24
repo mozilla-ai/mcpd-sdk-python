@@ -292,6 +292,7 @@ All SDK-level errors raise exceptions that inherit from `McpdError`. The origina
 | `ServerNotFoundError`  | Specified server doesn't exist          |
 | `ServerUnhealthyError` | Server exists but is not healthy        |
 | `ToolNotFoundError`    | Specified tool doesn't exist on server  |
+| `ToolBuildError`       | Tool function could not be built        |
 | `ToolExecutionError`   | Tool execution failed                   |
 | `ValidationError`      | Input validation failed                 |
 | `TimeoutError`         | Operation timed out                     |

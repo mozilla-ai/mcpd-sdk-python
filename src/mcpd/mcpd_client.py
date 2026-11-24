@@ -30,6 +30,7 @@ from .exceptions import (
     ServerUnhealthyError,
     TimeoutError,
     ToolExecutionError,
+    ValidationError,
 )
 from .function_builder import TOOL_SEPARATOR, FunctionBuilder
 
@@ -201,6 +202,8 @@ class McpdClient:
         # Initialize components
         self._logger = create_logger(logger)
         self._function_builder = FunctionBuilder(self)
+        self._server_tool_schemas: dict[str, list[dict[str, Any]]] = {}
+        self._discovered_servers: list[str] = []
 
         # Set up authentication
         if self._api_key:
@@ -433,7 +436,7 @@ class McpdClient:
     ) -> list[Callable[..., Any]]:
         """Generate callable Python functions for available tools, suitable for AI agents.
 
-        This method queries servers and creates self-contained, deepcopy-safe functions
+        This method queries servers and creates deepcopy-safe functions
         that can be passed to agentic frameworks like any-agent, LangChain, or custom AI
         systems. Each function includes its schema as metadata and handles the MCP
         communication internally.
@@ -442,11 +445,11 @@ class McpdClient:
         their health status before fetching tools. Unhealthy servers are silently skipped
         to ensure the method returns quickly without waiting for timeouts on failed servers.
 
-        Generated functions are cached for performance. Once cached, subsequent calls return
-        the cached functions immediately without refetching schemas from healthy servers,
-        regardless of filter parameters.
+        Generated functions are cached per server. A call the cache can answer in full
+        returns without reaching the daemon, so a server's health decides whether its
+        tools are built and is not re-read on every call.
         Use clear_agent_tools_cache() to clear the cache, or set refresh_cache to true
-        to force regeneration when tool schemas have changed.
+        to force regeneration when server health or tool schemas have changed.
 
         Args:
             servers: Optional list of server names to filter by.
@@ -466,7 +469,8 @@ class McpdClient:
                            Defaults to false.
 
         Returns:
-            A list of callable functions, one for each matching tool from healthy servers.
+            A list of callable functions, one for each matching tool from the servers that
+            were healthy when their tools were built.
             Each function has the following attributes:
             - __name__: The tool's qualified name (e.g., "time__get_current_time")
             - __doc__: The tool's description
@@ -477,8 +481,11 @@ class McpdClient:
             ConnectionError: If unable to connect to the mcpd daemon.
             TimeoutError: If requests to the daemon time out.
             AuthenticationError: If API key authentication fails.
-            McpdError: If unable to retrieve server health status or generate functions.
-                      Servers for which tool schemas cannot be retrieved will be ignored.
+            ToolBuildError: If a tool function cannot be built for a reason its
+                      definition does not account for.
+            McpdError: If unable to retrieve server health status. Servers whose tool
+                      schemas cannot be retrieved are ignored, as is a tool definition
+                      that does not match its contract.
 
         Examples:
             >>> from any_agent import AnyAgent, AgentConfig
@@ -532,20 +539,23 @@ class McpdClient:
         if refresh_cache:
             self.clear_agent_tools_cache()
 
-        all_tools = self._agent_tools()
+        all_tools = self._agent_tools(servers)
 
         return self._filter_agent_tools(all_tools, servers, tools)
 
-    def _agent_tools(self) -> list[_AgentFunction]:
-        """Get or build cached agent tool functions from all healthy servers.
+    def _agent_tools(self, servers: list[str] | None = None) -> list[_AgentFunction]:
+        """Get or build agent tool functions for the requested healthy servers.
 
-        This internal method manages the agent tools cache. On first call, it builds
-        the cache by fetching tools from all healthy servers. On subsequent calls,
-        it returns the cached functions immediately without refetching schemas.
+        This internal method manages the agent tools cache. A server's tools are
+        fetched and built once, then reused on subsequent calls. A call that the
+        cache can answer in full does not reach the daemon.
+
+        Args:
+            servers: Names of the servers to build tools for. All healthy servers
+                    when None.
 
         Returns:
-            List of callable agent functions.
-            Returns cached functions if available, otherwise builds and caches functions from all healthy servers.
+            List of callable agent functions, in the order their servers are reported.
 
         Raises:
             ConnectionError: If unable to connect to the mcpd daemon.
@@ -553,18 +563,31 @@ class McpdClient:
             AuthenticationError: If API key authentication fails.
             McpdError: If unable to retrieve server health status.
 
-        Note:
-            Servers for which tool schemas cannot be retrieved will be ignored.
-            When logging is enabled a warning will be logged for these servers.
-        """
-        # Return cached functions if available.
-        cached_functions = self._function_builder.get_cached_functions()
-        if cached_functions:
-            return cached_functions
+        NOTE: A tool definition is only ever read for a server named in `servers`,
+        so one server's definitions cannot affect another server's tools.
 
-        agent_tools = []
+        Note:
+            Servers whose tool schemas cannot be retrieved are ignored, as are tools
+            that cannot be built. When logging is enabled a warning is logged for each.
+        """
+        # Only an unfiltered call can be answered from the cache alone, because a filtered
+        # call must re-read health to decide which of the named servers to include.
+        if (
+            servers is None
+            and self._discovered_servers
+            and all(name in self._server_tool_schemas for name in self._discovered_servers)
+        ):
+            return self._build_tools(self._discovered_servers)
+
         healthy_servers = self._get_healthy_servers(self.servers())
+        self._discovered_servers = healthy_servers
+        if servers is not None:
+            healthy_servers = [name for name in healthy_servers if name in servers]
+
         for server_name in healthy_servers:
+            if server_name in self._server_tool_schemas:
+                continue
+
             try:
                 tool_schemas = self.tools(server_name=server_name)
             except (ConnectionError, TimeoutError, AuthenticationError, ServerNotFoundError, McpdError) as e:
@@ -572,11 +595,39 @@ class McpdClient:
                 self._logger.warn("Server '%s' became unavailable or unhealthy during tool fetch: %s", server_name, e)
                 continue
 
-            for tool_schema in tool_schemas:
-                func = self._function_builder.create_function_from_schema(tool_schema, server_name)
-                agent_tools.append(func)
+            self._server_tool_schemas[server_name] = tool_schemas
 
-        return agent_tools
+        return self._build_tools(healthy_servers)
+
+    def _build_tools(self, server_names: list[str]) -> list[_AgentFunction]:
+        """Build a function for every cached tool definition of the named servers.
+
+        Args:
+            server_names: Names of the servers whose tools to build.
+
+        Returns:
+            A new callable per usable tool, in the order the servers are named.
+
+        Raises:
+            ToolBuildError: If a tool function cannot be built for a reason its
+                definition does not account for.
+
+        Note:
+            A tool definition that does not match its contract is skipped. When logging
+            is enabled a warning is logged for it.
+        """
+        tools: list[_AgentFunction] = []
+        for server_name in server_names:
+            for schema in self._server_tool_schemas.get(server_name, []):
+                tool_name = schema.get("name") if isinstance(schema, dict) else None
+                try:
+                    tools.append(self._function_builder.create_function_from_schema(schema, server_name))
+                except ValidationError as e:
+                    # One rejected definition must not remove every other tool. Any other
+                    # failure is not caused by the definition, so it is not skipped.
+                    self._logger.warn("Skipping unusable tool %r on server '%s': %r", tool_name, server_name, e)
+
+        return tools
 
     def _get_healthy_servers(self, server_names: list[str]) -> list[str]:
         """Filter server names to only those that are healthy.
@@ -706,8 +757,8 @@ class McpdClient:
     def clear_agent_tools_cache(self) -> None:
         """Clear the cache of generated callable functions from agent_tools().
 
-        This method clears the internal FunctionBuilder cache that stores compiled
-        function templates. Call this when server configurations have changed to
+        This method clears the internal caches that hold generated functions and
+        the servers already built. Call this when server configurations have changed to
         ensure agent_tools() regenerates functions with the latest definitions.
 
         Call this method when:
@@ -734,6 +785,8 @@ class McpdClient:
             >>> tools_v2 = client.agent_tools()  # Regenerates from latest definitions
         """
         self._function_builder.clear_cache()
+        self._server_tool_schemas.clear()
+        self._discovered_servers = []
 
     def _exception_to_result(
         self, func: Callable[P, R], cacheable_exceptions: tuple[type[Exception], ...]

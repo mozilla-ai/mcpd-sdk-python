@@ -187,6 +187,29 @@ class ServerUnhealthyError(McpdError):
         self.health_status = health_status
 
 
+class ToolBuildError(McpdError):
+    """Raised when a tool function cannot be built for a reason other than its definition.
+
+    A tool definition that does not match its contract raises ValidationError instead.
+    This exception reports a failure that the definition does not account for, so it is
+    not resolved by correcting the definition.
+
+    Example:
+        >>> try:
+        >>>     tools = client.agent_tools()
+        >>> except ToolBuildError as e:
+        >>>     print(f"Tool functions are unavailable: {e}")
+        >>>     if e.__cause__:
+        >>>         print(f"Underlying cause: {e.__cause__}")
+
+    Note:
+        Callers should not retry on this exception. The same definition produces the
+        same failure until the cause is corrected.
+    """
+
+    pass
+
+
 class ToolNotFoundError(McpdError):
     """Raised when a specified tool doesn't exist on a server.
 

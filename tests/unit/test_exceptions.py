@@ -15,6 +15,7 @@ from mcpd.exceptions import (
     ServerNotFoundError,
     ServerUnhealthyError,
     TimeoutError,
+    ToolBuildError,
     ToolExecutionError,
     ToolNotFoundError,
     ValidationError,
@@ -133,6 +134,7 @@ class TestExceptionHierarchy:
         assert issubclass(PipelineError, McpdError)
         assert issubclass(ServerNotFoundError, McpdError)
         assert issubclass(ServerUnhealthyError, McpdError)
+        assert issubclass(ToolBuildError, McpdError)
         assert issubclass(ToolNotFoundError, McpdError)
         assert issubclass(ToolExecutionError, McpdError)
         assert issubclass(TimeoutError, McpdError)
@@ -146,6 +148,7 @@ class TestExceptionHierarchy:
             PipelineError("test", server_name="server1", operation="server1.tool1", pipeline_flow="request"),
             ServerNotFoundError("test", server_name="server1"),
             ServerUnhealthyError("test", server_name="server1", health_status="timeout"),
+            ToolBuildError("test"),
             ToolNotFoundError("test", server_name="server1", tool_name="tool1"),
             ToolExecutionError("test"),
             TimeoutError("test"),
