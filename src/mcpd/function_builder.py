@@ -544,6 +544,14 @@ class FunctionBuilder:
 
         return "\n".join(docstring_parts)
 
+    def get_cached_functions(self) -> list[Callable[..., Any]]:
+        """Build a function for every tool whose schema has been read.
+
+        Returns:
+            A new callable per cached tool, or an empty list when nothing is cached.
+        """
+        return [self._build_function(tool) for tool in self._function_cache.values()]
+
     def clear_cache(self) -> None:
         """Clear the internal function cache.
 

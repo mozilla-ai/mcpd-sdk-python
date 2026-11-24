@@ -215,6 +215,36 @@ class TestFunctionBuilder:
 
         assert len(function_builder._function_cache) == 0
 
+    def test_get_cached_functions_is_empty_before_anything_is_built(self, function_builder):
+        assert function_builder.get_cached_functions() == []
+
+    def test_get_cached_functions_returns_one_function_per_cached_tool(self, function_builder):
+        for tool_name in ["first_tool", "second_tool"]:
+            function_builder.create_function_from_schema(
+                {
+                    "name": tool_name,
+                    "description": "A tool to populate the cache.",
+                    "inputSchema": {"type": "object", "properties": {}, "required": []},
+                },
+                "server",
+            )
+
+        cached = function_builder.get_cached_functions()
+
+        assert [func._tool_name for func in cached] == ["first_tool", "second_tool"]
+
+    def test_get_cached_functions_returns_a_new_function_each_time(self, function_builder):
+        function_builder.create_function_from_schema(
+            {
+                "name": "cached_tool",
+                "description": "A tool to populate the cache.",
+                "inputSchema": {"type": "object", "properties": {}, "required": []},
+            },
+            "server",
+        )
+
+        assert function_builder.get_cached_functions()[0] is not function_builder.get_cached_functions()[0]
+
     def test_tool_name_that_is_not_an_identifier_becomes_a_safe_function_name(self, function_builder):
         schema = {
             "name": "test-tool",
